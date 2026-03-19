@@ -1,0 +1,123 @@
+---
+title: "FIPS 140-2"
+description: "Building SoftHSM v2 with FIPS 140-2 capable OpenSSL"
+---
+
+The OpenSSL backend can operate with a FIPS 140-2 capable OpenSSL library. This enables SoftHSM v2 to restrict cryptographic operations to FIPS-approved algorithms and enforce the self-test requirements mandated by FIPS 140-2.
+
+<Note>
+FIPS mode is only available with the OpenSSL backend. The Botan backend does not support FIPS 140-2 operation.
+</Note>
+
+## Overview
+
+FIPS 140-2 support in OpenSSL is provided through a validated cryptographic module (the "FIPS canister"). To use it, you must:
+
+1. Build a FIPS-capable OpenSSL static library with position-independent code (PIC).
+2. Use the `fipsld` linker script (supplied by OpenSSL) as your C and C++ compiler wrapper when building SoftHSM.
+
+Read the OpenSSL FIPS 140 SecurityPolicy and UserGuide documents before proceeding — they describe the exact requirements for a validated build.
+
+## Building a FIPS-capable OpenSSL
+
+<Steps>
+  <Step title="Obtain a validated OpenSSL source">
+    Download an OpenSSL source release that carries a FIPS 140-2 validation (e.g. OpenSSL 1.0.1e or a later validated version). Consult the CMVP certificate for the exact version.
+  </Step>
+  <Step title="Build with PIC">
+    The `libsofthsm2.so` shared library requires all statically linked code to be compiled as position-independent code. Pass the PIC flag when configuring OpenSSL:
+
+    ```bash
+    ./config shared fips -fPIC --prefix=/opt/openssl-fips
+    make
+    make install
+    ```
+
+    The FIPS module canister is already compiled with PIC, but the surrounding OpenSSL code must be as well.
+  </Step>
+  <Step title="Install fipsld">
+    After `make install`, the `fipsld` script is placed under the OpenSSL installation. Locate it:
+
+    ```bash
+    find /opt/openssl-fips -name fipsld
+    ```
+  </Step>
+</Steps>
+
+## Using fipsld as the compiler
+
+`fipsld` is a shell script that wraps the linker to inject FIPS integrity checks into the final binary. You must set both `CC` and `CXX` to `fipsld` when running `./configure` or `cmake`:
+
+```bash
+export CC=/opt/openssl-fips/bin/fipsld
+export CXX=/opt/openssl-fips/bin/fipsld
+./configure --with-crypto-backend=openssl --with-openssl=/opt/openssl-fips
+make
+```
+
+## Handling the C/C++ compiler mismatch
+
+A common problem is that the C++ compiler (g++) does not compile `.c` files as C code. You can verify this with a quick test:
+
+```c
+/* foo.c */
+foo() { char *x = "ab"; }
+```
+
+Compile with both compilers and compare the warnings:
+
+```bash
+gcc -Wall foo.c      # no warning about missing return type
+g++ -Wall foo.c      # raises a warning or error about missing type and char* constant
+```
+
+When this mismatch causes errors inside the `fipsld` script, you need a wrapper that inserts `-x c` and `-x none` around each `.c` file in C++ compiler invocations.
+
+### Wrapper script
+
+Create a wrapper script (e.g. `/usr/local/bin/fipsld-wrapper`) that calls `fipsld` but handles `.c` files correctly:
+
+```sh
+#!/bin/sh
+
+commands="g++"
+
+for elem in $@
+do
+  case $elem in
+    *.c) commands+=" -x c $elem -x none";;
+    *)   commands+=" $elem";;
+  esac
+done
+
+exec $commands
+```
+
+Make it executable:
+
+```bash
+chmod +x /usr/local/bin/fipsld-wrapper
+```
+
+Then set `CXX` to your wrapper instead of `fipsld` directly:
+
+```bash
+export CC=/opt/openssl-fips/bin/fipsld
+export CXX=/usr/local/bin/fipsld-wrapper
+./configure --with-crypto-backend=openssl --with-openssl=/opt/openssl-fips
+make
+```
+
+<Warning>
+You must set both `CC` and `CXX` to `fipsld` (or the wrapper) in all cases. Failing to do so will produce a binary that does not pass the FIPS integrity check at runtime.
+</Warning>
+
+## Self-test status
+
+At startup, `OSSLCryptoFactory` runs the FIPS self-tests required by the module. You can query the result through the `CryptoFactory` interface:
+
+```cpp
+bool ok = CryptoFactory::i()->getFipsSelfTestStatus();
+```
+
+If the self-tests fail, this returns `false` and SoftHSM will refuse to perform cryptographic operations.

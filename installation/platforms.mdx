@@ -1,0 +1,199 @@
+---
+title: "Platform notes"
+description: "Platform-specific installation requirements for Linux, macOS, and Windows"
+---
+
+<Tabs>
+  <Tab title="Linux">
+    ## Linux
+
+    Install the build dependencies for your distribution before running `./configure` or `cmake`.
+
+    <Tabs>
+      <Tab title="Debian / Ubuntu">
+        ```bash
+        sudo apt-get update
+        sudo apt-get install \
+            autoconf automake libtool pkg-config \
+            libssl-dev \
+            libsqlite3-dev \
+            libp11-kit-dev \
+            libcppunit-dev
+        ```
+
+        To use Botan instead of OpenSSL:
+
+        ```bash
+        sudo apt-get install libbotan-2-dev
+        ```
+      </Tab>
+      <Tab title="RHEL / CentOS / Fedora">
+        ```bash
+        sudo dnf install \
+            autoconf automake libtool libtool-ltdl-devel pkgconfig \
+            openssl-devel \
+            sqlite-devel \
+            p11-kit-devel \
+            cppunit-devel
+        ```
+
+        <Note>
+          On RHEL and CentOS you must install `libtool-ltdl-devel` in addition to `libtool`. This package provides the `ltdl` library used by the build system.
+        </Note>
+
+        To use Botan instead of OpenSSL:
+
+        ```bash
+        sudo dnf install botan2-devel
+        ```
+      </Tab>
+    </Tabs>
+  </Tab>
+
+  <Tab title="macOS">
+    ## macOS
+
+    ### Command line tools
+
+    You need a C++ compiler. Either install the full Xcode application, or install only the command line tools (much smaller download):
+
+    ```bash
+    xcode-select --install
+    ```
+
+    To verify that Xcode's tools are accessible:
+
+    ```bash
+    xcode-select --print-path
+    ```
+
+    ### Install dependencies with Homebrew
+
+    The system-provided versions of OpenSSL, SQLite, and libtool on macOS are outdated. Install newer versions via [Homebrew](https://brew.sh):
+
+    ```bash
+    brew install automake pkg-config openssl sqlite libtool cppunit
+    ```
+
+    <Note>
+      Homebrew installs these libraries under `/usr/local` (Intel) or `/opt/homebrew` (Apple Silicon). The `configure` script will not find them automatically; pass the prefix paths explicitly using `--with-openssl` and `--with-sqlite3`.
+    </Note>
+
+    <Warning>
+      Homebrew renames `libtool` to `glibtool` and `libtoolize` to `glibtoolize` to avoid conflicts with Apple's built-in `libtool`. The `autogen.sh` script handles this automatically.
+    </Warning>
+
+    ### Configure with Homebrew paths
+
+    ```bash
+    ./configure \
+        --with-openssl=/usr/local/opt/openssl \
+        --with-sqlite3=/usr/local/opt/sqlite
+    ```
+
+    To also enable the SQLite3 object store backend:
+
+    ```bash
+    ./configure \
+        --with-objectstore-backend-db \
+        --with-openssl=/usr/local/opt/openssl \
+        --with-sqlite3=/usr/local/opt/sqlite
+    ```
+
+    ### Compiler not found
+
+    If `./configure` cannot locate the C++ compiler, instruct it to use the Xcode-bundled compilers:
+
+    ```bash
+    export CC="xcrun gcc"
+    export CPP="xcrun cpp"
+    export CXX="xcrun g++"
+    ./configure --with-openssl=/usr/local/opt/openssl
+    ```
+
+    ### Running a specific test
+
+    To run only the PKCS#11 test suite:
+
+    ```bash
+    make -C src/lib/test check
+    ```
+
+    ### Performance notes
+
+    - The **file backend** (default) is generally at least twice as fast as the database backend.
+    - The **database backend** (`--with-objectstore-backend-db`) uses approximately 20% less memory and is better suited when storing more than 100,000 keys in a single token, as it can query and load only a subset of keys on demand.
+    - For read-only, latency-critical workloads, consider copying the token database to a RAM disk — but only when the token will not be modified, as a power cycle will destroy the RAM disk contents.
+  </Tab>
+
+  <Tab title="Windows">
+    ## Windows
+
+    SoftHSM v2 supports both 32-bit and 64-bit Windows builds. Two build paths are available:
+
+    - **CMake + vcpkg** (recommended) — see the [CMake build](/installation/cmake) page for the full walkthrough.
+    - **Legacy Visual Studio project** (`win32/softhsm2.sln`) — requires manually building all dependencies.
+
+    ### Legacy build: required software
+
+    The legacy `win32/` build requires the following tools to be installed:
+
+    - [Visual Studio 2015 Community](https://visualstudio.microsoft.com/vs/community/)
+    - [GNU Privacy Guard for Windows](http://www.gpg4win.org/) — for verifying downloaded archives
+    - [7-Zip](http://www.7-zip.org/) — for extracting source archives
+    - [Strawberry Perl](http://strawberryperl.com/) — required to build OpenSSL
+    - [NASM](http://www.nasm.us/) — required to build OpenSSL
+    - [Python 3](https://www.python.org/downloads/windows/) — required by the SoftHSM configure script and the Botan build
+
+    ### Legacy build: configure and compile
+
+    After building the OpenSSL or Botan dependency (see source instructions in `WIN32-NOTES.md`), open a Visual Studio command prompt and configure SoftHSM:
+
+    <Tabs>
+      <Tab title="32-bit">
+        ```bat
+        cd C:\build\src\SoftHSMv2\win32\
+        "C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\vcvarsall.bat"
+
+        :: OpenSSL backend
+        python Configure.py disable-debug disable-gost with-crypto-backend=openssl ^
+            with-openssl=C:\build\bin\openssl-1.1.0a-x86\ ^
+            with-cppunit=C:\build\bin\cppunit-1.13.2-x86\
+        ```
+      </Tab>
+      <Tab title="64-bit">
+        ```bat
+        cd C:\build\src\SoftHSMv2\win32\
+        "C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\vcvarsall.bat" amd64
+
+        :: OpenSSL backend
+        python Configure.py enable-64bit disable-debug disable-gost with-crypto-backend=openssl ^
+            with-openssl=C:\build\bin\openssl-1.1.0a-x64\ ^
+            with-cppunit=C:\build\bin\cppunit-1.13.2-x64\
+        ```
+      </Tab>
+    </Tabs>
+
+    Then open `win32\softhsm2.sln` in Visual Studio and build with the `Release` configuration.
+
+    <Warning>
+      The OpenSSL GOST engine is not compatible with OpenSSL 1.1.0. Pass `disable-gost` to the configure script when using OpenSSL 1.1.0 or later.
+    </Warning>
+
+    ### Post-install configuration (Windows)
+
+    After building, copy the configuration template and set the token directory:
+
+    ```bat
+    copy C:\build\src\SoftHSMv2\src\lib\common\softhsm2.conf.in C:\build\bin\SoftHSMv2\softhsm2.conf
+    ```
+
+    Edit `softhsm2.conf` and replace `@softhsmtokendir@` with the full path to your token directory (e.g. `C:\build\bin\SoftHSMv2\tokens`).
+
+    Then point SoftHSM at the configuration file:
+
+    ```bat
+    set SOFTHSM2_CONF=C:\build\bin\SoftHSMv2\softhsm2.conf
+    ```
+  </Tab>
+</Tabs>

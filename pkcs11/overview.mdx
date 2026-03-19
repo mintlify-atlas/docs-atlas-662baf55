@@ -1,0 +1,269 @@
+---
+title: "PKCS#11 overview"
+description: "Introduction to the PKCS#11 interface as implemented by SoftHSM v2"
+---
+
+PKCS#11 (also called Cryptoki) is the OASIS standard API for interacting with cryptographic devices such as hardware security modules (HSMs), smart cards, and hardware tokens. It defines a vendor-neutral C interface that applications use to perform cryptographic operations — key generation, signing, encryption, and more — without needing to know the implementation details of the underlying device.
+
+SoftHSM v2 implements PKCS#11 **version 3.2** (the pkcs11 header was updated to 3.2.0 in SoftHSM 2.7.0). The library is exposed as a shared object (`libsofthsm2.so` on Linux/macOS, `softhsm2.dll` on Windows) that any PKCS#11-aware application can load at runtime.
+
+## Loading the library
+
+There are two common ways to load `libsofthsm2.so` from a C or C++ application.
+
+<Tabs>
+  <Tab title="Dynamic loading (dlopen)">
+
+```c
+#include <dlfcn.h>
+#include "pkcs11.h"
+
+void *lib = dlopen("/usr/lib/softhsm/libsofthsm2.so", RTLD_NOW);
+if (!lib) {
+    fprintf(stderr, "dlopen: %s\n", dlerror());
+    return 1;
+}
+
+CK_C_GetFunctionList pGetFunctionList =
+    (CK_C_GetFunctionList)dlsym(lib, "C_GetFunctionList");
+
+CK_FUNCTION_LIST_PTR p11;
+pGetFunctionList(&p11);
+/* use p11->C_Initialize, p11->C_OpenSession, … */
+```
+
+  </Tab>
+  <Tab title="Static / direct linking">
+
+```c
+#include "pkcs11.h"
+
+/* Link with -lsofthsm2 and call functions directly */
+extern CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR ppFunctionList);
+
+CK_FUNCTION_LIST_PTR p11;
+C_GetFunctionList(&p11);
+```
+
+  </Tab>
+</Tabs>
+
+<Tip>
+When using `dlopen`, always call `C_GetFunctionList` to obtain the function-list pointer rather than resolving each symbol individually. This is the portable, spec-compliant approach and is how most PKCS#11 middleware works.
+</Tip>
+
+## Initialization sequence
+
+Every application that uses the library must follow this lifecycle:
+
+<Steps>
+  <Step title="C_Initialize">
+    Initialize the library and optionally supply mutex callbacks for thread safety.
+  </Step>
+  <Step title="C_GetSlotList">
+    Enumerate available slots (virtual token slots created by `softhsm2-util`).
+  </Step>
+  <Step title="C_OpenSession">
+    Open a session on the chosen slot. Pass `CKF_SERIAL_SESSION` (and `CKF_RW_SESSION` for write operations) in the `flags` argument.
+  </Step>
+  <Step title="C_Login">
+    Authenticate as `CKU_USER` (or `CKU_SO` for administrative operations) by providing the PIN.
+  </Step>
+  <Step title="Cryptographic operations">
+    Perform key generation, signing, encryption, or any other operations. Most operations follow an `Init` → `Update` (optional) → `Final` pattern.
+  </Step>
+  <Step title="C_CloseSession / C_Logout">
+    Close the session when finished. Logout is implicit when the last session on a token is closed.
+  </Step>
+  <Step title="C_Finalize">
+    Shut down the library cleanly before the process exits.
+  </Step>
+</Steps>
+
+### Minimal C example
+
+```c
+#include <stdio.h>
+#include <dlfcn.h>
+#include "pkcs11.h"
+
+int main(void)
+{
+    /* 1. Load the library */
+    void *lib = dlopen("/usr/lib/softhsm/libsofthsm2.so", RTLD_NOW);
+    CK_C_GetFunctionList pGetFL =
+        (CK_C_GetFunctionList)dlsym(lib, "C_GetFunctionList");
+
+    CK_FUNCTION_LIST_PTR p11;
+    pGetFL(&p11);
+
+    /* 2. Initialize */
+    CK_RV rv = p11->C_Initialize(NULL_PTR);
+    if (rv != CKR_OK) { fprintf(stderr, "C_Initialize: 0x%lx\n", rv); return 1; }
+
+    /* 3. Get the first slot with a token */
+    CK_ULONG slotCount;
+    p11->C_GetSlotList(CK_TRUE, NULL_PTR, &slotCount);
+    CK_SLOT_ID slots[slotCount];
+    p11->C_GetSlotList(CK_TRUE, slots, &slotCount);
+
+    /* 4. Open a read-write session */
+    CK_SESSION_HANDLE hSession;
+    p11->C_OpenSession(slots[0],
+                       CKF_SERIAL_SESSION | CKF_RW_SESSION,
+                       NULL_PTR, NULL_PTR, &hSession);
+
+    /* 5. Log in as the normal user */
+    CK_UTF8CHAR pin[] = "1234";
+    p11->C_Login(hSession, CKU_USER, pin, sizeof(pin) - 1);
+
+    /* … perform operations … */
+
+    /* 6. Finalize */
+    p11->C_Logout(hSession);
+    p11->C_CloseSession(hSession);
+    p11->C_Finalize(NULL_PTR);
+    dlclose(lib);
+    return 0;
+}
+```
+
+## Exported functions
+
+SoftHSM exports the complete PKCS#11 function set. The table below lists every function in the order they appear in `CK_FUNCTION_LIST`.
+
+| Function | Description |
+|---|---|
+| `C_Initialize` | Initialize the Cryptoki library |
+| `C_Finalize` | Clean up and shut down the library |
+| `C_GetInfo` | Return general information about the library |
+| `C_GetFunctionList` | Return a pointer to the function-list structure |
+| `C_GetSlotList` | List available slots |
+| `C_GetSlotInfo` | Return information about a specific slot |
+| `C_GetTokenInfo` | Return information about the token in a slot |
+| `C_GetMechanismList` | List mechanisms supported by a token |
+| `C_GetMechanismInfo` | Return information about a specific mechanism |
+| `C_InitToken` | Initialize a token (sets the SO PIN and label) |
+| `C_InitPIN` | Initialize the user PIN |
+| `C_SetPIN` | Change the current user or SO PIN |
+| `C_OpenSession` | Open a session with a token |
+| `C_CloseSession` | Close a session |
+| `C_CloseAllSessions` | Close all sessions on a slot |
+| `C_GetSessionInfo` | Return state information for a session |
+| `C_GetOperationState` | Serialize the state of a running operation |
+| `C_SetOperationState` | Restore a previously serialized operation state |
+| `C_Login` | Log into a token |
+| `C_Logout` | Log out from a token |
+| `C_CreateObject` | Create a new key or data object |
+| `C_CopyObject` | Copy an existing object |
+| `C_DestroyObject` | Destroy an object |
+| `C_GetObjectSize` | Return the size (in bytes) of an object |
+| `C_GetAttributeValue` | Read attributes from an object |
+| `C_SetAttributeValue` | Modify attributes on an object |
+| `C_FindObjectsInit` | Begin a search for objects matching a template |
+| `C_FindObjects` | Continue an active object search |
+| `C_FindObjectsFinal` | Terminate an object search |
+| `C_EncryptInit` | Initialize an encryption operation |
+| `C_Encrypt` | Encrypt data in a single call |
+| `C_EncryptUpdate` | Feed data to a running encryption operation |
+| `C_EncryptFinal` | Finalize a multi-part encryption operation |
+| `C_DecryptInit` | Initialize a decryption operation |
+| `C_Decrypt` | Decrypt data in a single call |
+| `C_DecryptUpdate` | Feed data to a running decryption operation |
+| `C_DecryptFinal` | Finalize a multi-part decryption operation |
+| `C_DigestInit` | Initialize a digest (hash) operation |
+| `C_Digest` | Hash data in a single call |
+| `C_DigestUpdate` | Feed data to a running digest operation |
+| `C_DigestKey` | Include a key's value in a running digest |
+| `C_DigestFinal` | Finalize a multi-part digest operation |
+| `C_SignInit` | Initialize a signing operation |
+| `C_Sign` | Sign data in a single call |
+| `C_SignUpdate` | Feed data to a running signing operation |
+| `C_SignFinal` | Finalize a multi-part signing operation |
+| `C_SignRecoverInit` | Initialize a signature-with-recovery operation |
+| `C_SignRecover` | Sign data, embedding it in the signature |
+| `C_VerifyInit` | Initialize a verification operation |
+| `C_Verify` | Verify a signature in a single call |
+| `C_VerifyUpdate` | Feed data to a running verification operation |
+| `C_VerifyFinal` | Finalize a multi-part verification operation |
+| `C_VerifyRecoverInit` | Initialize a verify-with-recovery operation |
+| `C_VerifyRecover` | Verify and recover the original signed data |
+| `C_DigestEncryptUpdate` | Combined digest + encrypt update step |
+| `C_DecryptDigestUpdate` | Combined decrypt + digest update step |
+| `C_SignEncryptUpdate` | Combined sign + encrypt update step |
+| `C_DecryptVerifyUpdate` | Combined decrypt + verify update step |
+| `C_GenerateKey` | Generate a secret (symmetric) key |
+| `C_GenerateKeyPair` | Generate an asymmetric key pair |
+| `C_WrapKey` | Wrap (encrypt) a key for export |
+| `C_UnwrapKey` | Unwrap (decrypt) an imported key |
+| `C_DeriveKey` | Derive a new key from an existing base key |
+| `C_SeedRandom` | Seed the random number generator |
+| `C_GenerateRandom` | Generate random bytes |
+| `C_GetFunctionStatus` | Legacy function (always returns `CKR_FUNCTION_NOT_PARALLEL`) |
+| `C_CancelFunction` | Legacy function (always returns `CKR_FUNCTION_NOT_PARALLEL`) |
+| `C_WaitForSlotEvent` | Wait or poll for a slot event |
+
+## Return values
+
+Every function returns a `CK_RV` value. The most important return codes are:
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `CKR_OK` | `0x00000000` | Success |
+| `CKR_ARGUMENTS_BAD` | `0x00000007` | Invalid argument passed to the function |
+| `CKR_CRYPTOKI_NOT_INITIALIZED` | `0x00000190` | `C_Initialize` has not been called |
+| `CKR_DEVICE_ERROR` | `0x00000030` | Internal device or implementation error |
+| `CKR_FUNCTION_FAILED` | `0x00000006` | The function could not complete |
+| `CKR_KEY_HANDLE_INVALID` | `0x00000060` | The key handle does not refer to a valid key |
+| `CKR_MECHANISM_INVALID` | `0x00000070` | The mechanism is not supported |
+| `CKR_PIN_INCORRECT` | `0x000000A0` | Wrong PIN supplied |
+| `CKR_SESSION_HANDLE_INVALID` | `0x000000B3` | The session handle is not valid |
+| `CKR_TOKEN_NOT_PRESENT` | `0x000000E0` | No token in the specified slot |
+| `CKR_USER_NOT_LOGGED_IN` | `0x00000101` | Operation requires authentication |
+
+<Info>
+Return code values are defined in `pkcs11.h`. Always check the return value of every PKCS#11 call; functions that produce output (for example `C_Encrypt`) may return `CKR_OK` with a length value and `NULL` data pointer on the first call as a way of querying the required output buffer size.
+</Info>
+
+## Thread safety
+
+SoftHSM is thread-safe. To use it from multiple threads you should either:
+
+- Pass `NULL_PTR` to `C_Initialize`, which causes SoftHSM to use OS-native mutexes internally, **or**
+- Supply a `CK_C_INITIALIZE_ARGS` structure with your own mutex callbacks.
+
+```c
+CK_C_INITIALIZE_ARGS initArgs = { 0 };
+
+/* Option A: let the library use OS mutexes */
+initArgs.flags = CKF_OS_LOCKING_OK;
+p11->C_Initialize(&initArgs);
+
+/* Option B: supply custom mutex functions */
+initArgs.CreateMutex  = myCreateMutex;
+initArgs.DestroyMutex = myDestroyMutex;
+initArgs.LockMutex    = myLockMutex;
+initArgs.UnlockMutex  = myUnlockMutex;
+p11->C_Initialize(&initArgs);
+```
+
+<Warning>
+Do not share a `CK_SESSION_HANDLE` across threads. Each thread should open its own session with `C_OpenSession`.
+</Warning>
+
+## PKCS#11 version
+
+SoftHSM v2.7.0 and later implements PKCS#11 **3.2** (Cryptoki version 3.2.0). The version is reported by `C_GetInfo` in the `cryptokiVersion` field and is also defined in the header:
+
+```c
+#define CRYPTOKI_VERSION_MAJOR 3
+#define CRYPTOKI_VERSION_MINOR 2
+#define CRYPTOKI_VERSION_REVISION 0
+```
+
+A compatibility alias is also defined for older middleware that checks for the PKCS#11 2.x series:
+
+```c
+#define CRYPTOKI_LEGACY_VERSION_MAJOR 2
+#define CRYPTOKI_LEGACY_VERSION_MINOR 40
+```

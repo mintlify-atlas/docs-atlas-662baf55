@@ -1,0 +1,134 @@
+---
+title: "Initialize tokens"
+description: "Create and configure PKCS#11 tokens using softhsm2-util or the PKCS#11 interface"
+---
+
+A token must be initialized before any application can use it. Initialization sets the token label, the Security Officer (SO) PIN, and the user PIN. You can initialize tokens using the `softhsm2-util` command-line utility or directly through the PKCS#11 `C_InitToken` function.
+
+## Using softhsm2-util
+
+### Select a slot to initialize
+
+You can target a slot in three ways:
+
+| Flag | Behavior |
+|---|---|
+| `--free` | Use the first available uninitialized slot. This is the recommended approach. |
+| `--slot <number>` | Target a specific slot by its numeric ID. |
+| `--token <label>` | Re-initialize an existing token identified by its label. |
+
+### Required flags
+
+| Flag | Description |
+|---|---|
+| `--label <text>` | A label for the token, up to 32 characters. Required. |
+| `--so-pin <PIN>` | The Security Officer PIN. Required (unless entered interactively). |
+| `--pin <PIN>` | The normal user PIN. Required (unless entered interactively). |
+
+If `--so-pin` and `--pin` are omitted, the tool prompts for them interactively.
+
+### Initialize using the free slot
+
+The recommended way to create a new token is with `--free`, which targets the always-available uninitialized slot without needing to know its slot ID:
+
+```bash
+softhsm2-util --init-token --free --label "My token 1" --so-pin 1234 --pin 5678
+```
+
+### Initialize by slot number
+
+You can also pass a specific slot number. Slot `0` is usually the first available slot on a fresh installation:
+
+```bash
+softhsm2-util --init-token --slot 0 --label "My token 1"
+```
+
+Without `--so-pin` and `--pin`, the tool prompts for both PINs interactively.
+
+## Slot reassignment after initialization
+
+After initialization, SoftHSM reassigns the token to a **new slot** whose ID is derived from the token's serial number. The slot number you used during `--init-token` does not persist.
+
+<Warning>
+Do not store the slot number used during initialization. After the command completes, retrieve the token's new slot ID by searching for it by label or serial number.
+</Warning>
+
+Additionally, SoftHSM automatically adds a new free (uninitialized) slot so that another token can be created in the future.
+
+To see the new slot assignment after initialization:
+
+```bash
+softhsm2-util --show-slots
+```
+
+## Re-initializing an existing token
+
+If a token is already initialized, running `--init-token` against it will **erase all objects** on the token and reset it with the new label and PINs. You must supply the current SO PIN to authorize this operation:
+
+```bash
+softhsm2-util --init-token --token "My token 1" --label "My token 1" \
+  --so-pin <current-so-pin> --pin <new-user-pin>
+```
+
+<Warning>
+Re-initialization is irreversible. All keys, certificates, and data objects stored on the token are permanently deleted.
+</Warning>
+
+You can also target the token by slot number or serial number:
+
+```bash
+# By slot number
+softhsm2-util --init-token --slot 0x2f8e4b1a --label "My token 1" --so-pin 1234 --pin 5678
+
+# By serial number
+softhsm2-util --init-token --serial 2f8e4b1aXXXXXXXX --label "My token 1" --so-pin 1234 --pin 5678
+```
+
+## Using the PKCS#11 C_InitToken function
+
+Applications can initialize tokens directly using the PKCS#11 API without `softhsm2-util`. The relevant function is `C_InitToken`:
+
+```c
+CK_RV C_InitToken(
+    CK_SLOT_ID    slotID,     /* slot to initialize */
+    CK_UTF8CHAR_PTR pPin,    /* SO PIN */
+    CK_ULONG      ulPinLen,  /* length of SO PIN */
+    CK_UTF8CHAR_PTR pLabel   /* 32-byte padded token label */
+);
+```
+
+After `C_InitToken` succeeds, set the user PIN by opening an SO session and calling `C_InitPIN`:
+
+```c
+/* Open an SO session */
+CK_SESSION_HANDLE hSession;
+C_OpenSession(slotID, CKF_RW_SESSION | CKF_SERIAL_SESSION, NULL, NULL, &hSession);
+C_Login(hSession, CKU_SO, pSOPin, ulSOPinLen);
+
+/* Set the user PIN */
+C_InitPIN(hSession, pUserPin, ulUserPinLen);
+
+C_Logout(hSession);
+C_CloseSession(hSession);
+```
+
+<Note>
+The `pLabel` parameter to `C_InitToken` must be exactly 32 bytes, padded with spaces on the right. SoftHSM handles this padding internally when called via `softhsm2-util`, but PKCS#11 applications must pad the label themselves.
+</Note>
+
+## What happens after initialization
+
+<Steps>
+  <Step title="Token receives a serial number">
+    SoftHSM generates a unique serial number for the new token at initialization time.
+  </Step>
+  <Step title="Token is moved to a new slot">
+    The token is reassigned to a slot whose ID is derived from the serial number. The original slot used during initialization no longer holds this token.
+  </Step>
+  <Step title="A new free slot is added">
+    SoftHSM adds a new empty slot so that another token can be initialized in the future. There is always at least one free slot available.
+  </Step>
+  <Step title="Token directory is created on disk">
+    A new subdirectory with a UUID name is created inside `directories.tokendir`. This directory stores the token metadata and any objects created on the token.
+  </Step>
+</Steps>

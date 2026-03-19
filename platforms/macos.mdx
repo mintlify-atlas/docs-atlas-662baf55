@@ -1,0 +1,208 @@
+---
+title: "macOS"
+description: "Installing and running SoftHSM v2 on macOS"
+---
+
+Building SoftHSM v2 on macOS requires Xcode command-line tools and a set of dependencies installed via [Homebrew](https://brew.sh/). The instructions below were originally verified on macOS 10.12 Sierra and apply broadly to later releases.
+
+## Prerequisites
+
+### Xcode command-line tools
+
+You need a C++ compiler. If you have Xcode installed, it is already available. To check where Xcode keeps the compiler:
+
+```bash
+xcode-select --print-path
+```
+
+If you prefer not to install all of Xcode, you can install only the command-line tools:
+
+```bash
+xcode-select --install
+```
+
+Alternatively, download the Command Line Tools package directly from [developer.apple.com](https://developer.apple.com/downloads/).
+
+If the compilers are not found during the configure step, export them explicitly:
+
+```bash
+export CC="xcrun gcc"
+export CPP="xcrun cpp"
+export CXX="xcrun g++"
+```
+
+### Homebrew
+
+The libraries bundled with macOS are too old for reliable builds. Install [Homebrew](https://brew.sh/) to get current versions:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+## Install dependencies
+
+```bash
+brew install automake
+brew install pkg-config
+brew install openssl
+brew install sqlite
+brew install cppunit
+brew install libtool
+```
+
+<Note>
+  Homebrew installs these libraries under `/usr/local/opt/` (Intel) or `/opt/homebrew/opt/` (Apple Silicon) to avoid conflicting with Apple's system copies. You must pass the Homebrew paths to `configure` explicitly — see the configure step below.
+</Note>
+
+<Note>
+  Homebrew renames `libtool` to `glibtool` and `libtoolize` to `glibtoolize` to avoid conflicts with Apple's own libtool. The `autogen.sh` script generates its own libtool wrapper, so this renaming does not cause problems in practice.
+</Note>
+
+## Build and install
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/opendnssec/SoftHSMv2.git
+    cd SoftHSMv2
+    ```
+  </Step>
+  <Step title="Generate the configure script">
+    ```bash
+    sh autogen.sh
+    ```
+  </Step>
+  <Step title="Configure">
+    You must pass the Homebrew-managed paths to OpenSSL and SQLite so the configure script can find them:
+
+    ```bash
+    ./configure \
+      --with-objectstore-backend-db \
+      --with-openssl=/usr/local/opt/openssl \
+      --with-sqlite3=/usr/local/opt/sqlite
+    ```
+
+    On Apple Silicon (M1/M2/M3), Homebrew installs to `/opt/homebrew` instead:
+
+    ```bash
+    ./configure \
+      --with-objectstore-backend-db \
+      --with-openssl=/opt/homebrew/opt/openssl \
+      --with-sqlite3=/opt/homebrew/opt/sqlite
+    ```
+
+    If the compilers were not picked up automatically, set them before running configure:
+
+    ```bash
+    export CC="xcrun gcc"
+    export CPP="xcrun cpp"
+    export CXX="xcrun g++"
+    ./configure \
+      --with-objectstore-backend-db \
+      --with-openssl=/usr/local/opt/openssl \
+      --with-sqlite3=/usr/local/opt/sqlite
+    ```
+  </Step>
+  <Step title="Compile">
+    ```bash
+    make
+    ```
+  </Step>
+  <Step title="Run tests (optional)">
+    ```bash
+    make check
+    ```
+
+    To run only the PKCS#11 test suite:
+
+    ```bash
+    make -C src/lib/test check
+    ```
+  </Step>
+  <Step title="Install">
+    ```bash
+    sudo make install
+    ```
+  </Step>
+</Steps>
+
+## Default install path
+
+The PKCS#11 library is installed to:
+
+```
+/usr/local/lib/softhsm/libsofthsm2.so
+```
+
+The default configuration file is read from `/etc/softhsm2.conf`. Override it with the `SOFTHSM2_CONF` environment variable:
+
+```bash
+export SOFTHSM2_CONF=/Users/youruser/softhsm2.conf
+```
+
+## Object store backends
+
+SoftHSM supports two storage backends for token objects:
+
+| Backend | Configure flag | Notes |
+|---|---|---|
+| File (default) | _(none)_ | One file per object. Fastest option. |
+| SQLite3 database | `--with-objectstore-backend-db` | Single `sqlite3.db` file per token. Better for large key stores. |
+
+### Switching to the database backend for testing
+
+After enabling `--with-objectstore-backend-db`, update the test configuration files:
+
+**`src/lib/test/softhsm2.conf`**:
+```
+# SoftHSM v2 configuration file
+directories.tokendir = ./tokens
+objectstore.backend = db
+log.level = INFO
+slots.removable = false
+```
+
+**`src/lib/test/softhsm2-alt.conf`**:
+```
+# SoftHSM v2 configuration file
+directories.tokendir = ./tokens
+objectstore.backend = db
+log.level = INFO
+slots.removable = true
+```
+
+Then re-run the tests:
+
+```bash
+make -C src/lib/test check
+```
+
+Verify that the database backend was used by checking for `sqlite3.db` inside the token subdirectories:
+
+```bash
+ls src/lib/test/tokens/*/sqlite3.db
+```
+
+## Performance notes
+
+<Tip>
+  The file backend is the fastest option — typically at least twice as fast as the database backend for most operations.
+</Tip>
+
+The SQLite3 database backend is designed for deployments with large numbers of keys (more than 100,000). Its advantages are:
+
+- **Single-file token store** — avoids file-system limits on the number of files per directory.
+- **Lower memory usage** — loads object attributes on demand, using roughly 20% less memory than the file backend.
+- **Selective loading** — designed to allow querying a subset of objects (selective query support is not yet fully implemented).
+
+For read-heavy workloads where the token is never modified, you can copy the entire token database to a RAM disk for maximum speed. Only do this when the application will not write to the token, as a power cycle will destroy the RAM disk contents.
+
+## Known issues and gotchas
+
+<Warning>
+  macOS ships its own copies of OpenSSL, SQLite, and libtool under `/usr`. These versions are outdated and may cause build failures or unexpected behavior at runtime. Always use the Homebrew-installed versions and pass their paths explicitly to `./configure`.
+</Warning>
+
+- **libtool naming**: Homebrew renames `libtool` to `glibtool` to avoid conflicting with Apple's libtool. The `autogen.sh` script handles this automatically.
+- **Homebrew path differences**: The prefix changed from `/usr/local` to `/opt/homebrew` on Apple Silicon. If configure cannot find a library, check `brew --prefix <package>` for the correct path.
+- **`xcrun` wrappers**: If configure fails to locate the compiler, use `export CC="xcrun gcc"` (and the equivalent for `CPP` and `CXX`) to force use of the Xcode-bundled toolchain.

@@ -1,0 +1,370 @@
+---
+title: "Signing and verification"
+description: "PKCS#11 digital signature and verification operations in SoftHSM v2"
+---
+
+SoftHSM v2 implements the full PKCS#11 signing and verification function family, supporting RSA (PKCS#1 v1.5 and PSS), ECDSA, DSA, EdDSA, GOST R 34.10, and HMAC/CMAC MAC mechanisms.
+
+## Signing functions
+
+### C_SignInit
+
+Initializes a signing operation on a session. You must call this before `C_Sign`, `C_SignUpdate`, or `C_SignFinal`.
+
+```c
+CK_RV C_SignInit(
+    CK_SESSION_HANDLE hSession,
+    CK_MECHANISM_PTR  pMechanism,
+    CK_OBJECT_HANDLE  hKey
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of the open session.
+</ParamField>
+
+<ParamField path="pMechanism" type="CK_MECHANISM_PTR" required>
+  Pointer to a `CK_MECHANISM` structure identifying the signing algorithm. Some mechanisms require parameters (for example, `CK_RSA_PKCS_PSS_PARAMS` for PSS).
+</ParamField>
+
+<ParamField path="hKey" type="CK_OBJECT_HANDLE" required>
+  Handle of the private key (or secret key for MAC mechanisms). The key must have `CKA_SIGN` set to `CK_TRUE`.
+</ParamField>
+
+Internally, SoftHSM routes the call to `MacSignInit` for MAC mechanisms or `AsymSignInit` for asymmetric mechanisms.
+
+---
+
+### C_Sign
+
+Signs data in a single-part operation.
+
+```c
+CK_RV C_Sign(
+    CK_SESSION_HANDLE hSession,
+    CK_BYTE_PTR       pData,
+    CK_ULONG          ulDataLen,
+    CK_BYTE_PTR       pSignature,
+    CK_ULONG_PTR      pulSignatureLen
+);
+```
+
+<ParamField path="pData" type="CK_BYTE_PTR" required>
+  Data to sign. For combined hash-and-sign mechanisms (e.g., `CKM_SHA256_RSA_PKCS`), this is the raw message. For raw mechanisms (e.g., `CKM_RSA_PKCS`, `CKM_ECDSA`), this is the pre-computed digest.
+</ParamField>
+
+<ParamField path="pSignature" type="CK_BYTE_PTR">
+  Buffer to receive the signature. Pass `NULL_PTR` on the first call to obtain the required buffer size.
+</ParamField>
+
+<ParamField path="pulSignatureLen" type="CK_ULONG_PTR" required>
+  On input: size of `pSignature`. On output: number of bytes written (or required size if `pSignature` is `NULL_PTR`).
+</ParamField>
+
+<Tip>
+Use the two-pass pattern. Pass `NULL_PTR` for `pSignature` — the function writes the required size to `*pulSignatureLen` and returns `CKR_OK`. Allocate the buffer, then call `C_Sign` again with the real pointer.
+</Tip>
+
+---
+
+### C_SignUpdate / C_SignFinal
+
+Multi-part signing — feed the data incrementally, then finalize.
+
+```c
+CK_RV C_SignUpdate(
+    CK_SESSION_HANDLE hSession,
+    CK_BYTE_PTR       pPart,
+    CK_ULONG          ulPartLen
+);
+
+CK_RV C_SignFinal(
+    CK_SESSION_HANDLE hSession,
+    CK_BYTE_PTR       pSignature,
+    CK_ULONG_PTR      pulSignatureLen
+);
+```
+
+<Note>
+Multi-part signing is only available for mechanisms that include internal hashing (for example, `CKM_SHA256_RSA_PKCS`, `CKM_DSA_SHA256`, `CKM_ECDSA_SHA256`). Raw mechanisms like `CKM_RSA_PKCS` and `CKM_ECDSA` are single-part only (`bAllowMultiPartOp = false` in the source).
+</Note>
+
+---
+
+### C_SignRecoverInit / C_SignRecover
+
+Sign with message recovery (RSA only). The signature output contains the embedded message so `C_VerifyRecover` can extract it without the original data.
+
+```c
+CK_RV C_SignRecoverInit(
+    CK_SESSION_HANDLE hSession,
+    CK_MECHANISM_PTR  pMechanism,
+    CK_OBJECT_HANDLE  hKey
+);
+
+CK_RV C_SignRecover(
+    CK_SESSION_HANDLE hSession,
+    CK_BYTE_PTR       pData,
+    CK_ULONG          ulDataLen,
+    CK_BYTE_PTR       pSignature,
+    CK_ULONG_PTR      pulSignatureLen
+);
+```
+
+---
+
+## Verification functions
+
+### C_VerifyInit / C_Verify
+
+Initialize and perform single-part signature verification.
+
+```c
+CK_RV C_VerifyInit(
+    CK_SESSION_HANDLE hSession,
+    CK_MECHANISM_PTR  pMechanism,
+    CK_OBJECT_HANDLE  hKey        /* public key or secret key for MAC */
+);
+
+CK_RV C_Verify(
+    CK_SESSION_HANDLE hSession,
+    CK_BYTE_PTR       pData,
+    CK_ULONG          ulDataLen,
+    CK_BYTE_PTR       pSignature,
+    CK_ULONG          ulSignatureLen
+);
+```
+
+The key must have `CKA_VERIFY` set to `CK_TRUE`. `C_Verify` returns `CKR_OK` on a valid signature or `CKR_SIGNATURE_INVALID` / `CKR_SIGNATURE_LEN_RANGE` on failure.
+
+---
+
+### C_VerifyUpdate / C_VerifyFinal
+
+Multi-part verification.
+
+```c
+CK_RV C_VerifyUpdate(
+    CK_SESSION_HANDLE hSession,
+    CK_BYTE_PTR       pPart,
+    CK_ULONG          ulPartLen
+);
+
+CK_RV C_VerifyFinal(
+    CK_SESSION_HANDLE hSession,
+    CK_BYTE_PTR       pSignature,
+    CK_ULONG          ulSignatureLen
+);
+```
+
+---
+
+### C_VerifyRecoverInit / C_VerifyRecover
+
+Verify a signature and recover the embedded message.
+
+```c
+CK_RV C_VerifyRecoverInit(
+    CK_SESSION_HANDLE hSession,
+    CK_MECHANISM_PTR  pMechanism,
+    CK_OBJECT_HANDLE  hKey
+);
+
+CK_RV C_VerifyRecover(
+    CK_SESSION_HANDLE hSession,
+    CK_BYTE_PTR       pSignature,
+    CK_ULONG          ulSignatureLen,
+    CK_BYTE_PTR       pData,
+    CK_ULONG_PTR      pulDataLen
+);
+```
+
+---
+
+## Supported signing mechanisms
+
+### RSA
+
+| Mechanism | Hash | Multi-part | Notes |
+|---|---|---|---|
+| `CKM_RSA_PKCS` | External (pre-hash) | No | PKCS#1 v1.5 raw sign |
+| `CKM_SHA1_RSA_PKCS` | SHA-1 | Yes | |
+| `CKM_SHA224_RSA_PKCS` | SHA-224 | Yes | |
+| `CKM_SHA256_RSA_PKCS` | SHA-256 | Yes | |
+| `CKM_SHA384_RSA_PKCS` | SHA-384 | Yes | |
+| `CKM_SHA512_RSA_PKCS` | SHA-512 | Yes | |
+| `CKM_MD5_RSA_PKCS` | MD5 | Yes | Not available in FIPS mode |
+| `CKM_RSA_PKCS_PSS` | External (pre-hash) | No | PSS with explicit params; requires `WITH_RAW_PSS` build |
+| `CKM_SHA1_RSA_PKCS_PSS` | SHA-1 | Yes | PSS |
+| `CKM_SHA224_RSA_PKCS_PSS` | SHA-224 | Yes | PSS |
+| `CKM_SHA256_RSA_PKCS_PSS` | SHA-256 | Yes | PSS |
+| `CKM_SHA384_RSA_PKCS_PSS` | SHA-384 | Yes | PSS |
+| `CKM_SHA512_RSA_PKCS_PSS` | SHA-512 | Yes | PSS |
+| `CKM_RSA_X_509` | External | No | Raw RSA (no padding) |
+
+### DSA
+
+| Mechanism | Hash | Multi-part |
+|---|---|---|
+| `CKM_DSA` | External | No |
+| `CKM_DSA_SHA1` | SHA-1 | Yes |
+| `CKM_DSA_SHA224` | SHA-224 | Yes |
+| `CKM_DSA_SHA256` | SHA-256 | Yes |
+| `CKM_DSA_SHA384` | SHA-384 | Yes |
+| `CKM_DSA_SHA512` | SHA-512 | Yes |
+
+### ECDSA
+
+| Mechanism | Hash | Multi-part | Notes |
+|---|---|---|---|
+| `CKM_ECDSA` | External (pre-hash) | No | |
+| `CKM_ECDSA_SHA1` | SHA-1 | No | |
+| `CKM_ECDSA_SHA224` | SHA-224 | No | |
+| `CKM_ECDSA_SHA256` | SHA-256 | No | |
+| `CKM_ECDSA_SHA384` | SHA-384 | No | |
+| `CKM_ECDSA_SHA512` | SHA-512 | No | |
+
+<Note>
+The ECDSA-with-hash mechanisms (`CKM_ECDSA_SHA256` etc.) were added in SoftHSM v2.7.0. Earlier versions only supported `CKM_ECDSA` with an externally computed digest.
+</Note>
+
+### EdDSA
+
+| Mechanism | Notes |
+|---|---|
+| `CKM_EDDSA` | Ed25519 and Ed448; single-part only; requires `WITH_EDDSA` build |
+
+### GOST
+
+| Mechanism | Hash | Notes |
+|---|---|---|
+| `CKM_GOSTR3410` | External | Requires `WITH_GOST` build |
+| `CKM_GOSTR3410_WITH_GOSTR3411` | GOST R 34.11-94 | Multi-part; requires `WITH_GOST` build |
+
+### MAC mechanisms
+
+MAC mechanisms use `C_SignInit` / `C_Sign` with a secret key rather than a private key. The key must have `CKA_SIGN`.
+
+| Mechanism | Key type |
+|---|---|
+| `CKM_SHA_1_HMAC` | `CKK_GENERIC_SECRET` or `CKK_SHA_1_HMAC` |
+| `CKM_SHA256_HMAC` | `CKK_GENERIC_SECRET` |
+| `CKM_SHA384_HMAC` | `CKK_GENERIC_SECRET` |
+| `CKM_SHA512_HMAC` | `CKK_GENERIC_SECRET` |
+| `CKM_AES_CMAC` | `CKK_AES` |
+| `CKM_DES3_CMAC` | `CKK_DES2` or `CKK_DES3` |
+
+---
+
+## Mechanism parameters
+
+### CK_RSA_PKCS_PSS_PARAMS
+
+Required for all PSS mechanisms.
+
+```c
+typedef struct CK_RSA_PKCS_PSS_PARAMS {
+    CK_MECHANISM_TYPE    hashAlg;  /* hash to use: e.g. CKM_SHA256 */
+    CK_RSA_PKCS_MGF_TYPE mgf;     /* MGF: e.g. CKG_MGF1_SHA256 */
+    CK_ULONG             sLen;    /* salt length in bytes */
+} CK_RSA_PKCS_PSS_PARAMS;
+```
+
+<Warning>
+The `hashAlg` and `mgf` fields must use matching algorithms. SoftHSM validates this and returns `CKR_ARGUMENTS_BAD` if they disagree (for example, `CKM_SHA256` with `CKG_MGF1_SHA1`).
+</Warning>
+
+For `CKM_SHA256_RSA_PKCS_PSS` the params must specify `hashAlg = CKM_SHA256` and `mgf = CKG_MGF1_SHA256`. For `CKM_RSA_PKCS_PSS` (raw PSS), any of the supported hash algorithms may be chosen.
+
+---
+
+## Error codes
+
+| Return value | Meaning |
+|---|---|
+| `CKR_OK` | Success |
+| `CKR_ARGUMENTS_BAD` | Missing or malformed mechanism parameters |
+| `CKR_KEY_FUNCTION_NOT_PERMITTED` | The key does not have `CKA_SIGN` / `CKA_VERIFY` |
+| `CKR_KEY_TYPE_INCONSISTENT` | Key type does not match mechanism |
+| `CKR_BUFFER_TOO_SMALL` | Output buffer too small |
+| `CKR_SIGNATURE_INVALID` | Signature verification failed |
+| `CKR_SIGNATURE_LEN_RANGE` | Signature length is wrong for the mechanism |
+| `CKR_OPERATION_ACTIVE` | Another operation is already in progress |
+| `CKR_OPERATION_NOT_INITIALIZED` | `C_SignInit` / `C_VerifyInit` has not been called |
+| `CKR_USER_NOT_LOGGED_IN` | Key requires re-authentication (`CKA_ALWAYS_AUTHENTICATE`) |
+
+---
+
+## Examples
+
+### RSA-PSS sign
+
+```c
+#include <pkcs11.h>
+
+/*
+ * Sign data with RSA-SHA256-PSS.
+ * hPrivKey must have CKA_SIGN = CK_TRUE.
+ */
+void rsa_pss_sign(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hPrivKey)
+{
+    CK_RSA_PKCS_PSS_PARAMS pssParams = {
+        CKM_SHA256,       /* hashAlg */
+        CKG_MGF1_SHA256,  /* mgf     */
+        32                /* sLen: salt length = hash length is a common choice */
+    };
+
+    CK_MECHANISM mechanism = {
+        CKM_SHA256_RSA_PKCS_PSS,
+        &pssParams,
+        sizeof(pssParams)
+    };
+
+    CK_BYTE message[] = "Message to sign";
+    CK_ULONG messageLen = sizeof(message) - 1;
+
+    CK_RV rv = C_SignInit(hSession, &mechanism, hPrivKey);
+    if (rv != CKR_OK) { /* handle error */ return; }
+
+    /* First pass: get signature length */
+    CK_ULONG sigLen = 0;
+    rv = C_Sign(hSession, message, messageLen, NULL_PTR, &sigLen);
+    if (rv != CKR_OK) { return; }
+
+    CK_BYTE *sig = malloc(sigLen);
+
+    /* Second pass: sign */
+    rv = C_Sign(hSession, message, messageLen, sig, &sigLen);
+    if (rv != CKR_OK) { free(sig); return; }
+
+    /* sig[0..sigLen-1] contains the RSA-PSS signature */
+    free(sig);
+}
+```
+
+### ECDSA verify
+
+```c
+/*
+ * Verify an ECDSA-SHA256 signature.
+ * hPubKey must have CKA_VERIFY = CK_TRUE.
+ */
+void ecdsa_verify(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hPubKey,
+                  CK_BYTE *message, CK_ULONG messageLen,
+                  CK_BYTE *signature, CK_ULONG signatureLen)
+{
+    CK_MECHANISM mechanism = { CKM_ECDSA_SHA256, NULL_PTR, 0 };
+
+    CK_RV rv = C_VerifyInit(hSession, &mechanism, hPubKey);
+    if (rv != CKR_OK) { return; }
+
+    rv = C_Verify(hSession, message, messageLen, signature, signatureLen);
+    if (rv == CKR_OK) {
+        /* Signature is valid */
+    } else if (rv == CKR_SIGNATURE_INVALID) {
+        /* Signature does not match */
+    } else {
+        /* Unexpected error */
+    }
+}
+```

@@ -1,0 +1,220 @@
+---
+title: "Key wrapping"
+description: "Wrap and unwrap cryptographic keys using PKCS#11 in SoftHSM v2"
+---
+
+Key wrapping is the process of encrypting a key so it can be exported or stored outside the HSM. SoftHSM v2 implements `C_WrapKey` to encrypt (wrap) a key and `C_UnwrapKey` to import a previously wrapped key.
+
+## Functions
+
+### C_WrapKey
+
+Encrypts (wraps) a key object using a wrapping key.
+
+```c
+CK_RV C_WrapKey(
+    CK_SESSION_HANDLE hSession,
+    CK_MECHANISM_PTR  pMechanism,
+    CK_OBJECT_HANDLE  hWrappingKey,
+    CK_OBJECT_HANDLE  hKey,
+    CK_BYTE_PTR       pWrappedKey,
+    CK_ULONG_PTR      pulWrappedKeyLen
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of the open session.
+</ParamField>
+
+<ParamField path="pMechanism" type="CK_MECHANISM_PTR" required>
+  Wrapping mechanism, such as `CKM_AES_KEY_WRAP` or `CKM_RSA_PKCS_OAEP`. Some mechanisms require parameters (for example, `CKM_AES_CBC` requires a 16-byte IV).
+</ParamField>
+
+<ParamField path="hWrappingKey" type="CK_OBJECT_HANDLE" required>
+  Handle of the key to use for wrapping. Must have `CKA_WRAP = CK_TRUE`.
+</ParamField>
+
+<ParamField path="hKey" type="CK_OBJECT_HANDLE" required>
+  Handle of the key to be wrapped. Must have `CKA_EXTRACTABLE = CK_TRUE`.
+</ParamField>
+
+<ParamField path="pWrappedKey" type="CK_BYTE_PTR">
+  Buffer to receive the wrapped key bytes. Pass `NULL_PTR` on the first call to get the required size.
+</ParamField>
+
+<ParamField path="pulWrappedKeyLen" type="CK_ULONG_PTR" required>
+  On input: size of `pWrappedKey`. On output: number of bytes written or required.
+</ParamField>
+
+<Tip>
+Use the two-pass pattern. Call `C_WrapKey` with `pWrappedKey = NULL_PTR` to obtain the wrapped key size, allocate the buffer, then call again with the real pointer.
+</Tip>
+
+---
+
+### C_UnwrapKey
+
+Decrypts (unwraps) a wrapped key and creates a new key object on the token.
+
+```c
+CK_RV C_UnwrapKey(
+    CK_SESSION_HANDLE    hSession,
+    CK_MECHANISM_PTR     pMechanism,
+    CK_OBJECT_HANDLE     hUnwrappingKey,
+    CK_BYTE_PTR          pWrappedKey,
+    CK_ULONG             ulWrappedKeyLen,
+    CK_ATTRIBUTE_PTR     pTemplate,
+    CK_ULONG             ulCount,
+    CK_OBJECT_HANDLE_PTR phKey
+);
+```
+
+<ParamField path="hUnwrappingKey" type="CK_OBJECT_HANDLE" required>
+  Handle of the key to use for unwrapping. Must have `CKA_UNWRAP = CK_TRUE`.
+</ParamField>
+
+<ParamField path="pWrappedKey" type="CK_BYTE_PTR" required>
+  The wrapped key bytes to import.
+</ParamField>
+
+<ParamField path="ulWrappedKeyLen" type="CK_ULONG" required>
+  Length of `pWrappedKey` in bytes.
+</ParamField>
+
+<ParamField path="pTemplate" type="CK_ATTRIBUTE_PTR" required>
+  Attributes for the newly created key object (type, usage flags, token storage, etc.).
+</ParamField>
+
+<ParamField path="ulCount" type="CK_ULONG" required>
+  Number of attributes in `pTemplate`.
+</ParamField>
+
+<ParamField path="phKey" type="CK_OBJECT_HANDLE_PTR" required>
+  Receives the handle of the newly created key object.
+</ParamField>
+
+---
+
+## Supported wrapping mechanisms
+
+| Mechanism | Wrapping key type | Parameters | Notes |
+|---|---|---|---|
+| `CKM_AES_KEY_WRAP` | `CKK_AES` | None | RFC 3394 AES Key Wrap; requires `HAVE_AES_KEY_WRAP` build |
+| `CKM_AES_KEY_WRAP_PAD` | `CKK_AES` | None | RFC 5649 AES Key Wrap with padding; requires `HAVE_AES_KEY_WRAP_PAD` build |
+| `CKM_AES_CBC` | `CKK_AES` | 16-byte IV | |
+| `CKM_AES_CBC_PAD` | `CKK_AES` | 16-byte IV | PKCS#7 padding; added in SoftHSM v2.7.0 |
+| `CKM_RSA_PKCS` | `CKK_RSA` (public key) | None | PKCS#1 v1.5 encryption |
+| `CKM_RSA_PKCS_OAEP` | `CKK_RSA` (public key) | `CK_RSA_PKCS_OAEP_PARAMS` | OAEP encryption |
+| `CKM_RSA_AES_KEY_WRAP` | `CKK_RSA` (public key) | `CK_RSA_AES_KEY_WRAP_PARAMS` | RSA-OAEP wraps an ephemeral AES key, which then wraps the target key; added in SoftHSM v2.7.0 |
+
+<Warning>
+For `CKM_AES_CBC` and `CKM_AES_CBC_PAD`, the mechanism's `pParameter` must be a 16-byte IV and `ulParameterLen` must be 16. Providing `NULL_PTR` or a different length returns `CKR_ARGUMENTS_BAD`.
+</Warning>
+
+<Warning>
+For `CKM_RSA_PKCS`, `CKM_AES_KEY_WRAP`, and `CKM_AES_KEY_WRAP_PAD`, the mechanism must have `pParameter = NULL_PTR` and `ulParameterLen = 0`; any non-NULL parameter returns `CKR_ARGUMENTS_BAD`.
+</Warning>
+
+---
+
+## Required key attributes
+
+### On the wrapping key
+
+| Attribute | Value required |
+|---|---|
+| `CKA_WRAP` | `CK_TRUE` |
+
+The wrapping key class must match the mechanism. RSA wrapping mechanisms (`CKM_RSA_PKCS`, `CKM_RSA_PKCS_OAEP`, `CKM_RSA_AES_KEY_WRAP`) require a `CKO_PUBLIC_KEY` of type `CKK_RSA`. AES wrapping mechanisms require a `CKO_SECRET_KEY` of type `CKK_AES`.
+
+### On the key being wrapped
+
+| Attribute | Value required |
+|---|---|
+| `CKA_EXTRACTABLE` | `CK_TRUE` |
+
+<Warning>
+`CKA_WRAP_WITH_TRUSTED`: once this attribute is set to `CK_TRUE` on a key, it becomes read-only and cannot be reset to `CK_FALSE`. When set, the key may only be wrapped by a key that has `CKA_TRUSTED = CK_TRUE`. This protects against unauthorized key export (issue #591).
+</Warning>
+
+---
+
+## Error codes
+
+| Return value | Meaning |
+|---|---|
+| `CKR_OK` | Success |
+| `CKR_ARGUMENTS_BAD` | Mechanism parameters are missing or malformed |
+| `CKR_WRAPPING_KEY_HANDLE_INVALID` | The wrapping key handle is invalid |
+| `CKR_WRAPPING_KEY_TYPE_INCONSISTENT` | The wrapping key type does not match the mechanism |
+| `CKR_KEY_NOT_WRAPPABLE` | The key to be wrapped does not have `CKA_EXTRACTABLE = CK_TRUE` |
+| `CKR_KEY_UNEXTRACTABLE` | The key cannot be exported |
+| `CKR_KEY_FUNCTION_NOT_PERMITTED` | The wrapping key does not have `CKA_WRAP = CK_TRUE` |
+| `CKR_MECHANISM_INVALID` | The mechanism is not supported |
+| `CKR_BUFFER_TOO_SMALL` | Output buffer is too small |
+| `CKR_USER_NOT_LOGGED_IN` | Private object access without login |
+
+---
+
+## Example: AES key wrap and unwrap
+
+```c
+#include <stdlib.h>
+#include <pkcs11.h>
+
+/*
+ * Wrap hTargetKey with hWrappingKey using CKM_AES_KEY_WRAP (RFC 3394),
+ * then import the result back via C_UnwrapKey.
+ *
+ * hWrappingKey: AES key with CKA_WRAP = CK_TRUE
+ * hTargetKey:  AES or any key with CKA_EXTRACTABLE = CK_TRUE
+ */
+void aes_key_wrap_roundtrip(CK_SESSION_HANDLE hSession,
+                             CK_OBJECT_HANDLE  hWrappingKey,
+                             CK_OBJECT_HANDLE  hTargetKey)
+{
+    CK_MECHANISM mechanism = { CKM_AES_KEY_WRAP, NULL_PTR, 0 };
+
+    /* --- Wrap: first pass to get size --- */
+    CK_ULONG wrappedLen = 0;
+    CK_RV rv = C_WrapKey(hSession, &mechanism,
+                          hWrappingKey, hTargetKey,
+                          NULL_PTR, &wrappedLen);
+    if (rv != CKR_OK) { return; }
+
+    CK_BYTE *wrapped = malloc(wrappedLen);
+
+    /* --- Wrap: second pass --- */
+    rv = C_WrapKey(hSession, &mechanism,
+                   hWrappingKey, hTargetKey,
+                   wrapped, &wrappedLen);
+    if (rv != CKR_OK) { free(wrapped); return; }
+
+    /* --- Unwrap: import back into the token --- */
+    CK_ULONG keyLen  = 32; /* The wrapped key was AES-256 */
+    CK_BBOOL ckTrue  = CK_TRUE;
+    CK_BBOOL ckFalse = CK_FALSE;
+    CK_KEY_TYPE keyType = CKK_AES;
+    CK_OBJECT_CLASS keyClass = CKO_SECRET_KEY;
+
+    CK_ATTRIBUTE unwrapTemplate[] = {
+        { CKA_CLASS,       &keyClass, sizeof(keyClass) },
+        { CKA_KEY_TYPE,    &keyType,  sizeof(keyType) },
+        { CKA_VALUE_LEN,   &keyLen,   sizeof(keyLen) },
+        { CKA_ENCRYPT,     &ckTrue,   sizeof(ckTrue) },
+        { CKA_DECRYPT,     &ckTrue,   sizeof(ckTrue) },
+        { CKA_TOKEN,       &ckFalse,  sizeof(ckFalse) },
+        { CKA_EXTRACTABLE, &ckFalse,  sizeof(ckFalse) },
+    };
+
+    CK_OBJECT_HANDLE hImportedKey;
+    rv = C_UnwrapKey(hSession, &mechanism,
+                     hWrappingKey,
+                     wrapped, wrappedLen,
+                     unwrapTemplate, 7,
+                     &hImportedKey);
+    /* rv == CKR_OK: hImportedKey is now ready to use */
+
+    free(wrapped);
+}
+```

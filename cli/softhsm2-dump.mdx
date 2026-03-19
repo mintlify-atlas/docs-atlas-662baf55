@@ -1,0 +1,90 @@
+---
+title: "softhsm2-dump"
+description: "Inspect and debug token contents with softhsm2-dump-file and softhsm2-dump-db"
+---
+
+SoftHSM v2 ships two low-level inspection tools for dumping token contents to stdout. They are intended for debugging and are not required for normal operation.
+
+| Tool | Object store type | Input |
+|---|---|---|
+| `softhsm2-dump-file` | File-based object store | Path to a single object file |
+| `softhsm2-dump-db` | SQLite3 database object store | Path to a `.db` database file |
+
+<Note>
+  SoftHSM v2 supports two storage backends: a file-based store (one file per object) and a SQLite3 database store. Use the tool that matches the backend configured for your installation.
+</Note>
+
+## softhsm2-dump-file
+
+Dumps a SoftHSM v2 object file from the file-based object store.
+
+```bash
+softhsm2-dump-file path
+```
+
+### Options
+
+<ParamField path="path" type="string" required>
+  Path to the SoftHSM v2 object file to dump. Object files are stored in the token directory defined in `softhsm2.conf` and typically have names like `<object-id>.object`.
+</ParamField>
+
+<ParamField path="--help, -h" type="flag">
+  Show the help screen.
+</ParamField>
+
+### Example
+
+```bash
+softhsm2-dump-file /var/lib/softhsm/tokens/abc123/00000000.object
+```
+
+## softhsm2-dump-db
+
+Dumps a SoftHSM v2 SQLite3 database from the database-backed object store.
+
+```bash
+softhsm2-dump-db path
+```
+
+### Options
+
+<ParamField path="path" type="string" required>
+  Path to the SoftHSM v2 SQLite3 database file to dump. The location of this file is defined in `softhsm2.conf`.
+</ParamField>
+
+<ParamField path="--help, -h" type="flag">
+  Show the help screen.
+</ParamField>
+
+### Example
+
+```bash
+softhsm2-dump-db /var/lib/softhsm/tokens/mytoken/token.db
+```
+
+## Debugging workflow
+
+<Steps>
+  <Step title="Identify your storage backend">
+    Check your `softhsm2.conf` to determine whether you are using the file-based or SQLite3 backend, and locate the token directory.
+  </Step>
+  <Step title="Locate the object store">
+    For the file backend, navigate to the token directory and identify the object files. For the database backend, find the `.db` file in the token directory.
+  </Step>
+  <Step title="Dump the contents">
+    Run the appropriate tool:
+
+    ```bash
+    # File-based backend
+    softhsm2-dump-file /var/lib/softhsm/tokens/<token-dir>/00000001.object
+
+    # SQLite3 database backend
+    softhsm2-dump-db /var/lib/softhsm/tokens/<token-dir>/token.db
+    ```
+  </Step>
+</Steps>
+
+## See also
+
+- [`softhsm2-util`](/cli/softhsm2-util) — token management and key import
+- `softhsm2.conf(5)` — SoftHSM configuration reference

@@ -1,0 +1,399 @@
+---
+title: "Windows"
+description: "Building and running SoftHSM v2 on Windows"
+---
+
+SoftHSM v2 can be built for Windows as both 32-bit and 64-bit binaries. The build produces `softhsm2.dll` — a standard PKCS#11 DLL that any compatible application can load. Two build methods are available: the legacy Visual Studio solution (using a Python-based configure script) and the modern CMake + vcpkg method.
+
+<Note>
+  The SQLite3 database object store backend is supported on Windows. It can be enabled with `-DWITH_OBJECTSTORE_BACKEND_DB=ON` (CMake) or `with-objectstore-backend-db` (legacy). This support was introduced in SoftHSM v2.7.0 (issue #717).
+</Note>
+
+## Build methods
+
+<Tabs>
+  <Tab title="CMake + vcpkg (recommended)">
+    The CMake build uses [vcpkg](https://vcpkg.io/) to manage dependencies and is the recommended approach for new builds.
+
+    ### Requirements
+
+    - [Visual Studio](https://visualstudio.microsoft.com/vs/community/) (Community edition or higher, with C++ workload)
+    - [CMake](https://cmake.org/)
+    - [vcpkg](https://vcpkg.io/)
+
+    ### Set up working directories
+
+    ```bat
+    set VCPKG_HOME=C:\Projects\vcpkg
+    set SOFTHSM_HOME=C:\Projects\SoftHSMv2
+    git clone https://github.com/opendnssec/SoftHSMv2.git %SOFTHSM_HOME%
+    git clone https://github.com/Microsoft/vcpkg.git %VCPKG_HOME%
+    ```
+
+    ### Build dependencies with vcpkg
+
+    ```bat
+    cd %VCPKG_HOME%
+    bootstrap-vcpkg.bat
+    git fetch
+    git checkout 2021.05.12
+
+    vcpkg install cppunit:x86-windows
+    vcpkg install cppunit:x86-windows-static
+    vcpkg install openssl-windows:x86-windows
+    vcpkg install botan:x86-windows
+    vcpkg install sqlite3:x86-windows
+
+    vcpkg install cppunit:x64-windows
+    vcpkg install cppunit:x64-windows-static
+    vcpkg install openssl-windows:x64-windows
+    vcpkg install botan:x64-windows
+    vcpkg install sqlite3:x64-windows
+
+    vcpkg integrate install
+    ```
+
+    ### Configure
+
+    <Tabs>
+      <Tab title="32-bit">
+        ```bat
+        mkdir %SOFTHSM_HOME%\tmp32
+        cd %SOFTHSM_HOME%\tmp32
+        cmake .. -G "Visual Studio 15 2017" -A Win32 ^
+          -DCMAKE_TOOLCHAIN_FILE=%VCPKG_HOME%\scripts\buildsystems\vcpkg.cmake ^
+          -DCMAKE_INSTALL_PREFIX=%SOFTHSM_HOME%\out32 ^
+          -DBUILD_TESTS=ON ^
+          -DWITH_CRYPTO_BACKEND=openssl ^
+          -DWITH_OBJECTSTORE_BACKEND_DB=OFF
+        ```
+      </Tab>
+      <Tab title="64-bit">
+        ```bat
+        mkdir %SOFTHSM_HOME%\tmp64
+        cd %SOFTHSM_HOME%\tmp64
+        cmake .. -G "Visual Studio 15 2017" -A x64 ^
+          -DCMAKE_TOOLCHAIN_FILE=%VCPKG_HOME%\scripts\buildsystems\vcpkg.cmake ^
+          -DCMAKE_INSTALL_PREFIX=%SOFTHSM_HOME%\out64 ^
+          -DBUILD_TESTS=ON ^
+          -DWITH_CRYPTO_BACKEND=botan ^
+          -DWITH_OBJECTSTORE_BACKEND_DB=ON
+        ```
+      </Tab>
+    </Tabs>
+
+    ### CMake configuration options
+
+    | Option | Description |
+    |---|---|
+    | `-DBUILD_TESTS=ON` | Compile tests alongside the library |
+    | `-DWITH_CRYPTO_BACKEND=openssl\|botan` | Select the cryptographic backend |
+    | `-DWITH_OBJECTSTORE_BACKEND_DB=ON` | Enable the SQLite3 object store |
+    | `-DENABLE_EDDSA=ON` | Enable EdDSA support |
+    | `-DENABLE_MLDSA=ON` | Enable ML-DSA (post-quantum) support |
+    | `-DWITH_MIGRATE=ON` | Build the SoftHSM v1 migration tool |
+    | `-DDISABLE_NON_PAGED_MEMORY=ON` | Disable non-paged memory for secure storage |
+
+    ### Compile
+
+    ```bat
+    cmake --build . --config RelWithDebInfo
+    ```
+
+    ### Test
+
+    ```bat
+    ctest -C RelWithDebInfo --output-on-failure --progress --verbose
+    ```
+
+    ### Install
+
+    ```bat
+    cmake -DCMAKE_INSTALL_CONFIG_NAME=RelWithDebInfo -P cmake_install.cmake
+    ```
+  </Tab>
+  <Tab title="Legacy Visual Studio solution">
+    The legacy build uses a Python-based `Configure.py` script and the `softhsm2.sln` Visual Studio solution.
+
+    ### Requirements
+
+    - [Visual Studio 2015 Community](https://www.visualstudio.com/products/visual-studio-community-vs) or later
+    - [GNU Privacy Guard for Windows (Gpg4win)](http://www.gpg4win.org/) — for verifying download signatures
+    - [7-Zip](http://www.7-zip.org/)
+    - [Strawberry Perl](http://strawberryperl.com/)
+    - [NASM](http://www.nasm.us/) — the Netwide Assembler (required for building OpenSSL)
+    - [Python 3](https://www.python.org/downloads/windows/)
+
+    ### Prepare working directories
+
+    ```bat
+    mkdir C:\build\bin\
+    mkdir C:\build\src\
+    ```
+
+    ### Build OpenSSL (static library)
+
+    Download OpenSSL and verify its signature before building:
+
+    ```bat
+    cd C:\build\src\
+    gpg --keyserver pgp.mit.edu --recv-keys 0E604491
+    gpg --verify openssl-1.1.0a.tar.gz.asc openssl-1.1.0a.tar.gz
+    ```
+
+    <Tabs>
+      <Tab title="32-bit">
+        Extract and build in a **new** command-line window:
+
+        ```bat
+        cd C:\build\src\
+        "C:\Program Files\7-Zip\7z" x openssl-1.1.0a.tar.gz
+        "C:\Program Files\7-Zip\7z" x openssl-1.1.0a.tar
+        rename openssl-1.1.0a openssl-1.1.0a-x86
+        del openssl-1.1.0a.tar*
+
+        cd C:\build\src\openssl-1.1.0a-x86
+        set PATH=%PATH%;C:\nasm
+        "C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\vcvarsall.bat"
+        perl Configure VC-WIN32 --prefix=C:\build\bin\openssl-1.1.0a-x86 --openssldir=C:\build\bin\openssl-1.1.0a-x86\ssl no-shared
+        nmake
+        nmake test
+        nmake install
+        ```
+      </Tab>
+      <Tab title="64-bit">
+        Extract and build in a **new** command-line window:
+
+        ```bat
+        cd C:\build\src\
+        "C:\Program Files\7-Zip\7z" x openssl-1.1.0a.tar.gz
+        "C:\Program Files\7-Zip\7z" x openssl-1.1.0a.tar
+        rename openssl-1.1.0a openssl-1.1.0a-x64
+        del openssl-1.1.0a.tar*
+
+        cd C:\build\src\openssl-1.1.0a-x64
+        set PATH=%PATH%;C:\nasm
+        "C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\vcvarsall.bat" amd64
+        perl Configure VC-WIN64A --prefix=C:\build\bin\openssl-1.1.0a-x64 --openssldir=C:\build\bin\openssl-1.1.0a-x64\ssl no-shared
+        nmake
+        nmake test
+        nmake install
+        ```
+      </Tab>
+    </Tabs>
+
+    ### Build CppUnit (unicode library)
+
+    <Tabs>
+      <Tab title="32-bit">
+        Extract CppUnit:
+
+        ```bat
+        cd C:\build\src\
+        "C:\Program Files\7-Zip\7z" x cppunit-1.13.2.tar.gz
+        "C:\Program Files\7-Zip\7z" x cppunit-1.13.2.tar
+        rename cppunit-1.13.2 cppunit-1.13.2-x86
+        del cppunit-1.13.2.tar*
+        ```
+
+        Open `C:\build\src\cppunit-1.13.2-x86\src\CppUnitLibraries2010.sln` in Visual Studio and rebuild with the **Release Unicode / Win32** configuration.
+
+        Copy the results:
+
+        ```bat
+        mkdir C:\build\bin\cppunit-1.13.2-x86\lib
+        xcopy C:\build\src\cppunit-1.13.2-x86\lib C:\build\bin\cppunit-1.13.2-x86\lib /E
+        mkdir C:\build\bin\cppunit-1.13.2-x86\include
+        xcopy C:\build\src\cppunit-1.13.2-x86\include C:\build\bin\cppunit-1.13.2-x86\include /E
+        ```
+      </Tab>
+      <Tab title="64-bit">
+        Extract CppUnit:
+
+        ```bat
+        cd C:\build\src\
+        "C:\Program Files\7-Zip\7z" x cppunit-1.13.2.tar.gz
+        "C:\Program Files\7-Zip\7z" x cppunit-1.13.2.tar
+        rename cppunit-1.13.2 cppunit-1.13.2-x64
+        del cppunit-1.13.2.tar*
+        ```
+
+        Open `C:\build\src\cppunit-1.13.2-x64\src\CppUnitLibraries2010.sln` in Visual Studio and rebuild with the **Release Unicode / x64** configuration.
+
+        Copy the results:
+
+        ```bat
+        mkdir C:\build\bin\cppunit-1.13.2-x64\lib
+        xcopy C:\build\src\cppunit-1.13.2-x64\lib C:\build\bin\cppunit-1.13.2-x64\lib /E
+        mkdir C:\build\bin\cppunit-1.13.2-x64\include
+        xcopy C:\build\src\cppunit-1.13.2-x64\include C:\build\bin\cppunit-1.13.2-x64\include /E
+        ```
+      </Tab>
+    </Tabs>
+
+    ### Get SoftHSM source
+
+    Clone from GitHub or download and verify a release tarball:
+
+    ```bat
+    cd C:\build\src\
+    git clone https://github.com/opendnssec/SoftHSMv2.git
+    ```
+
+    ### Configure and build SoftHSM
+
+    <Tabs>
+      <Tab title="32-bit">
+        Open a **new** command-line window and initialize the MSVC environment:
+
+        ```bat
+        cd C:\build\src\SoftHSMv2\win32\
+        "C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\vcvarsall.bat"
+        ```
+
+        Run the Python configure script (choose OpenSSL or Botan):
+
+        ```bat
+        REM OpenSSL backend (GOST not supported with 1.1.0+)
+        python Configure.py disable-debug disable-gost with-crypto-backend=openssl with-openssl=C:\build\bin\openssl-1.1.0a-x86\ with-cppunit=C:\build\bin\cppunit-1.13.2-x86\
+
+        REM Botan backend
+        python Configure.py disable-debug with-crypto-backend=botan with-botan=C:\build\bin\botan-1.10.10-x86\ with-cppunit=C:\build\bin\cppunit-1.13.2-x86\
+        ```
+
+        Open `C:\build\src\SoftHSMv2\win32\softhsm2.sln` in Visual Studio and rebuild with the **Release / Win32** configuration.
+
+        Verify the build:
+
+        ```bat
+        C:\build\src\SoftHSMv2\win32\Release\cryptotest.exe
+        C:\build\src\SoftHSMv2\win32\Release\datamgrtest.exe
+        C:\build\src\SoftHSMv2\win32\Release\handlemgrtest.exe
+        C:\build\src\SoftHSMv2\win32\Release\objstoretest.exe
+        C:\build\src\SoftHSMv2\win32\Release\p11test.exe
+        C:\build\src\SoftHSMv2\win32\Release\sessionmgrtest.exe
+        C:\build\src\SoftHSMv2\win32\Release\slotmgrtest.exe
+        ```
+
+        Copy the output to a distribution directory:
+
+        ```bat
+        mkdir C:\build\bin\SoftHSMv2-x86
+        mkdir C:\build\bin\SoftHSMv2-x86\tokens
+        copy C:\build\src\SoftHSMv2\win32\Release\softhsm2.dll C:\build\bin\SoftHSMv2-x86\
+        copy C:\build\src\SoftHSMv2\win32\Release\softhsm2-dump-file.exe C:\build\bin\SoftHSMv2-x86\
+        copy C:\build\src\SoftHSMv2\win32\Release\softhsm2-keyconv.exe C:\build\bin\SoftHSMv2-x86\
+        copy C:\build\src\SoftHSMv2\win32\Release\softhsm2-util.exe C:\build\bin\SoftHSMv2-x86\
+        copy C:\build\src\SoftHSMv2\src\lib\common\softhsm2.conf.in C:\build\bin\SoftHSMv2-x86\softhsm2.conf
+        ```
+      </Tab>
+      <Tab title="64-bit">
+        Open a **new** command-line window and initialize the MSVC environment for amd64:
+
+        ```bat
+        cd C:\build\src\SoftHSMv2\win32\
+        "C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\vcvarsall.bat" amd64
+        ```
+
+        Run the Python configure script (choose OpenSSL or Botan):
+
+        ```bat
+        REM OpenSSL backend
+        python Configure.py enable-64bit disable-debug disable-gost with-crypto-backend=openssl with-openssl=C:\build\bin\openssl-1.1.0a-x64\ with-cppunit=C:\build\bin\cppunit-1.13.2-x64\
+
+        REM Botan backend
+        python Configure.py enable-64bit disable-debug with-crypto-backend=botan with-botan=C:\build\bin\botan-1.10.10-x64\ with-cppunit=C:\build\bin\cppunit-1.13.2-x64\
+        ```
+
+        Open `C:\build\src\SoftHSMv2\win32\softhsm2.sln` in Visual Studio and rebuild with the **Release / x64** configuration.
+
+        Verify the build:
+
+        ```bat
+        C:\build\src\SoftHSMv2\win32\x64\Release\cryptotest.exe
+        C:\build\src\SoftHSMv2\win32\x64\Release\datamgrtest.exe
+        C:\build\src\SoftHSMv2\win32\x64\Release\handlemgrtest.exe
+        C:\build\src\SoftHSMv2\win32\x64\Release\objstoretest.exe
+        C:\build\src\SoftHSMv2\win32\x64\Release\p11test.exe
+        C:\build\src\SoftHSMv2\win32\x64\Release\sessionmgrtest.exe
+        C:\build\src\SoftHSMv2\win32\x64\Release\slotmgrtest.exe
+        ```
+
+        Copy the output to a distribution directory:
+
+        ```bat
+        mkdir C:\build\bin\SoftHSMv2-x64
+        mkdir C:\build\bin\SoftHSMv2-x64\tokens
+        copy C:\build\src\SoftHSMv2\win32\x64\Release\softhsm2.dll C:\build\bin\SoftHSMv2-x64\
+        copy C:\build\src\SoftHSMv2\win32\x64\Release\softhsm2-dump-file.exe C:\build\bin\SoftHSMv2-x64\
+        copy C:\build\src\SoftHSMv2\win32\x64\Release\softhsm2-keyconv.exe C:\build\bin\SoftHSMv2-x64\
+        copy C:\build\src\SoftHSMv2\win32\x64\Release\softhsm2-util.exe C:\build\bin\SoftHSMv2-x64\
+        copy C:\build\src\SoftHSMv2\src\lib\common\softhsm2.conf.in C:\build\bin\SoftHSMv2-x64\softhsm2.conf
+        ```
+      </Tab>
+    </Tabs>
+
+    <Note>
+      Add `enable-static-runtime` to the `Configure.py` command line if you want to link against the static CRT (`/MT`). If you do this, you must also rebuild CppUnit with the static CRT: change the **Runtime Library** project setting for the `cppunit` project to **Multi-threaded (/MT)**. Build errors in `TestRunner` can be ignored since it is not used by SoftHSM.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Output files
+
+A successful build produces the following files:
+
+| File | Description |
+|---|---|
+| `softhsm2.dll` | The PKCS#11 library — load this in your application |
+| `softhsm2-util.exe` | Token management utility |
+| `softhsm2-keyconv.exe` | Key conversion utility |
+| `softhsm2-dump-file.exe` | Object store dump utility |
+
+The source tree under `win32/` contains the Visual Studio project files for each component: `softhsm2/`, `util/`, `keyconv/`, `dump/`, and the test projects (`cryptotest/`, `datamgrtest/`, etc.).
+
+## Configuration
+
+### Configuration file
+
+SoftHSM on Windows reads its configuration from a file pointed to by the `SOFTHSM2_CONF` environment variable. There is no fixed system-wide path.
+
+Copy the template configuration file from the source tree and set the token directory path:
+
+```bat
+copy C:\build\src\SoftHSMv2\src\lib\common\softhsm2.conf.in C:\SoftHSM\softhsm2.conf
+```
+
+Edit `softhsm2.conf` and replace `@softhsmtokendir@` with your actual token directory, for example `C:\SoftHSM\tokens`:
+
+```
+# SoftHSM v2 configuration file
+directories.tokendir = C:\SoftHSM\tokens
+objectstore.backend = file
+log.level = INFO
+```
+
+Create the token directory:
+
+```bat
+mkdir C:\SoftHSM\tokens
+```
+
+Set the environment variable so SoftHSM can find the file:
+
+```bat
+set SOFTHSM2_CONF=C:\SoftHSM\softhsm2.conf
+```
+
+To make this permanent, set `SOFTHSM2_CONF` in **System Properties > Environment Variables**.
+
+### Logging
+
+On Windows, log output is sent to the **Windows Event Log** rather than syslog. The log level is controlled by `log.level` in `softhsm2.conf`. View events using **Event Viewer** (`eventvwr.msc`).
+
+## Known limitations on Windows
+
+- **GOST algorithm support**: The OpenSSL GOST engine is not supported with OpenSSL 1.1.0 and later. Pass `disable-gost` to `Configure.py` when using OpenSSL 1.1.0+.
+- **Non-paged memory**: Non-paged memory for secure key storage can cause issues in some environments. The CI build disables it with `-DDISABLE_NON_PAGED_MEMORY=ON`. You can disable it at configure time if needed.
+- **No p11-kit integration**: p11-kit is a Linux/macOS concept. There is no equivalent system-wide PKCS#11 module registry on Windows; applications must be configured to load `softhsm2.dll` directly.
+- **Static CRT**: If you mix static and dynamic CRT linkage across components, you will encounter linker errors. Ensure CppUnit and SoftHSM are built with the same CRT setting.

@@ -1,0 +1,339 @@
+---
+title: "Supported mechanisms"
+description: "Complete list of PKCS#11 cryptographic mechanisms supported by SoftHSM v2"
+---
+
+SoftHSM exposes its supported mechanism list through `C_GetMechanismList` and `C_GetMechanismInfo`. The list is assembled at startup from `prepareSupportedMechanisms()` and can be further filtered by the `slots.mechanisms` configuration option.
+
+<Note>
+Mechanisms that depend on optional compile-time features (ECC, EdDSA, GOST, ML-DSA) are only present when SoftHSM was built with the corresponding flag. FIPS mode disables MD5 and single-DES throughout.
+</Note>
+
+## RSA
+
+<AccordionGroup>
+  <Accordion title="Key generation">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_RSA_PKCS_KEY_PAIR_GEN` | Generate an RSA key pair. Supported key sizes: 512 – 16384 bits (in practice, use 2048 or larger). |
+
+  </Accordion>
+  <Accordion title="Encryption and decryption">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_RSA_PKCS` | RSA encryption/decryption with PKCS#1 v1.5 padding. Also used for raw sign/verify. |
+| `CKM_RSA_X_509` | Raw RSA (no padding). The caller is responsible for applying padding before calling `C_Encrypt`. |
+| `CKM_RSA_PKCS_OAEP` | RSA OAEP encryption/decryption. Requires a `CK_RSA_PKCS_OAEP_PARAMS` parameter specifying the hash and MGF algorithm. |
+
+  </Accordion>
+  <Accordion title="Signing and verification">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_SHA1_RSA_PKCS` | SHA-1 hash then RSA-PKCS#1 v1.5 signature. |
+| `CKM_SHA224_RSA_PKCS` | SHA-224 hash then RSA-PKCS#1 v1.5 signature. |
+| `CKM_SHA256_RSA_PKCS` | SHA-256 hash then RSA-PKCS#1 v1.5 signature. |
+| `CKM_SHA384_RSA_PKCS` | SHA-384 hash then RSA-PKCS#1 v1.5 signature. |
+| `CKM_SHA512_RSA_PKCS` | SHA-512 hash then RSA-PKCS#1 v1.5 signature. |
+| `CKM_MD5_RSA_PKCS` | MD5 hash then RSA-PKCS#1 v1.5 signature. Disabled in FIPS mode. |
+| `CKM_RSA_PKCS_PSS` | RSA-PSS raw sign/verify (caller pre-hashes). Enabled when built with `WITH_RAW_PSS`. |
+| `CKM_SHA1_RSA_PKCS_PSS` | SHA-1 hash then RSA-PSS signature. |
+| `CKM_SHA224_RSA_PKCS_PSS` | SHA-224 hash then RSA-PSS signature. |
+| `CKM_SHA256_RSA_PKCS_PSS` | SHA-256 hash then RSA-PSS signature. |
+| `CKM_SHA384_RSA_PKCS_PSS` | SHA-384 hash then RSA-PSS signature. |
+| `CKM_SHA512_RSA_PKCS_PSS` | SHA-512 hash then RSA-PSS signature. |
+
+  </Accordion>
+  <Accordion title="Key wrapping">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_RSA_AES_KEY_WRAP` | Wrap an AES key under an RSA public key using RSA-OAEP + AES-KeyWrap (RFC 5649). Added in SoftHSM 2.7.0. Requires `CK_RSA_AES_KEY_WRAP_PARAMS`. |
+
+  </Accordion>
+</AccordionGroup>
+
+## DSA
+
+<AccordionGroup>
+  <Accordion title="Key and parameter generation">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_DSA_PARAMETER_GEN` | Generate DSA domain parameters (p, q, g). |
+| `CKM_DSA_KEY_PAIR_GEN` | Generate a DSA key pair from previously generated parameters. |
+
+  </Accordion>
+  <Accordion title="Signing and verification">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_DSA` | Raw DSA sign/verify (caller supplies the pre-hashed digest). |
+| `CKM_DSA_SHA1` | SHA-1 hash then DSA signature. |
+| `CKM_DSA_SHA224` | SHA-224 hash then DSA signature. |
+| `CKM_DSA_SHA256` | SHA-256 hash then DSA signature. |
+| `CKM_DSA_SHA384` | SHA-384 hash then DSA signature. |
+| `CKM_DSA_SHA512` | SHA-512 hash then DSA signature. |
+
+  </Accordion>
+</AccordionGroup>
+
+## Elliptic curve (ECDSA / ECDH)
+
+<Note>
+EC mechanisms are available when SoftHSM is built with `--enable-ecc` (OpenSSL backend) or the equivalent Botan option. Supported curves include the NIST P-curves (P-256, P-384, P-521) and others provided by the underlying crypto library.
+</Note>
+
+<AccordionGroup>
+  <Accordion title="Key generation">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_EC_KEY_PAIR_GEN` | Generate an EC key pair. The curve is specified via the `CKA_EC_PARAMS` attribute on the public key template (DER-encoded OID). |
+
+  </Accordion>
+  <Accordion title="Signing and verification">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_ECDSA` | Raw ECDSA sign/verify (caller supplies pre-hashed digest). |
+| `CKM_ECDSA_SHA1` | SHA-1 hash then ECDSA signature. Added in SoftHSM 2.7.0. |
+| `CKM_ECDSA_SHA224` | SHA-224 hash then ECDSA signature. Added in SoftHSM 2.7.0. |
+| `CKM_ECDSA_SHA256` | SHA-256 hash then ECDSA signature. Added in SoftHSM 2.7.0. |
+| `CKM_ECDSA_SHA384` | SHA-384 hash then ECDSA signature. Added in SoftHSM 2.7.0. |
+| `CKM_ECDSA_SHA512` | SHA-512 hash then ECDSA signature. Added in SoftHSM 2.7.0. |
+
+  </Accordion>
+  <Accordion title="Key derivation">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_ECDH1_DERIVE` | One-pass ECDH key derivation (requires `CK_ECDH1_DERIVE_PARAMS`). Available when built with `WITH_ECC` or `WITH_EDDSA`. |
+
+  </Accordion>
+</AccordionGroup>
+
+## EdDSA (Edwards-curve)
+
+<Note>
+EdDSA mechanisms require `--enable-eddsa` at build time (OpenSSL 1.1.1+ or Botan 2). Ed25519 and Ed448 are supported.
+</Note>
+
+<AccordionGroup>
+  <Accordion title="Key generation">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_EC_EDWARDS_KEY_PAIR_GEN` | Generate an Edwards-curve key pair. Specify `Ed25519` or `Ed448` via `CKA_EC_PARAMS`. |
+
+  </Accordion>
+  <Accordion title="Signing and verification">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_EDDSA` | EdDSA sign/verify. Supports both Ed25519 and Ed448. The algorithm is determined by the key's curve. |
+
+  </Accordion>
+</AccordionGroup>
+
+## Diffie-Hellman (DH)
+
+<AccordionGroup>
+  <Accordion title="Parameter and key generation">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_DH_PKCS_PARAMETER_GEN` | Generate DH domain parameters (prime p, base g). |
+| `CKM_DH_PKCS_KEY_PAIR_GEN` | Generate a DH key pair from existing parameters. |
+
+  </Accordion>
+  <Accordion title="Key derivation">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_DH_PKCS_DERIVE` | Derive a shared secret from a DH private key and a peer public value. |
+
+  </Accordion>
+</AccordionGroup>
+
+## AES
+
+<AccordionGroup>
+  <Accordion title="Key generation">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_AES_KEY_GEN` | Generate an AES secret key. Key length (16, 24, or 32 bytes) is set via `CKA_VALUE_LEN`. |
+
+  </Accordion>
+  <Accordion title="Encryption and decryption">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_AES_ECB` | AES in Electronic Codebook mode. No IV; not recommended for most use cases. |
+| `CKM_AES_CBC` | AES in Cipher Block Chaining mode. Requires a 16-byte IV. |
+| `CKM_AES_CBC_PAD` | AES-CBC with PKCS#7 padding. Handles arbitrary-length plaintext. |
+| `CKM_AES_CTR` | AES in Counter mode. Requires `CK_AES_CTR_PARAMS` specifying the counter block. |
+| `CKM_AES_GCM` | AES in Galois/Counter mode (authenticated encryption). Requires `CK_GCM_PARAMS`. Added in SoftHSM 2.4.0. |
+
+  </Accordion>
+  <Accordion title="Key wrapping">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_AES_KEY_WRAP` | RFC 3394 AES Key Wrap. Wraps keys whose length is a multiple of 8 bytes. |
+| `CKM_AES_KEY_WRAP_PAD` | RFC 5649 AES Key Wrap with Padding. Wraps keys of any length. Available when built with `HAVE_AES_KEY_WRAP_PAD`. |
+| `CKM_AES_CBC` | AES-CBC can also be used for key wrapping (added in SoftHSM 2.6.0). |
+| `CKM_AES_CBC_PAD` | AES-CBC with PKCS#7 padding for key wrapping (added in SoftHSM 2.7.0). |
+
+  </Accordion>
+  <Accordion title="Key derivation and MAC">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_AES_ECB_ENCRYPT_DATA` | Derive a key by encrypting a data block with AES-ECB. |
+| `CKM_AES_CBC_ENCRYPT_DATA` | Derive a key by encrypting a data block with AES-CBC. |
+| `CKM_AES_CMAC` | AES Cipher-based MAC (CMAC / OMAC1). Added in SoftHSM 2.4.0. |
+
+  </Accordion>
+</AccordionGroup>
+
+## Triple-DES (3DES)
+
+<Note>
+Single-DES key generation (`CKM_DES_KEY_GEN`) and single-DES cipher modes (`CKM_DES_ECB`, `CKM_DES_CBC`, `CKM_DES_CBC_PAD`) are disabled in FIPS mode. Triple-DES is available in both standard and FIPS builds.
+</Note>
+
+<AccordionGroup>
+  <Accordion title="Key generation">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_DES_KEY_GEN` | Generate a single-DES key (8 bytes). Disabled in FIPS mode. |
+| `CKM_DES2_KEY_GEN` | Generate a two-key Triple-DES key (16 bytes). |
+| `CKM_DES3_KEY_GEN` | Generate a three-key Triple-DES key (24 bytes). |
+
+  </Accordion>
+  <Accordion title="Encryption and decryption">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_DES_ECB` | Single-DES ECB mode. Disabled in FIPS mode. |
+| `CKM_DES_CBC` | Single-DES CBC mode. Disabled in FIPS mode. |
+| `CKM_DES_CBC_PAD` | Single-DES CBC with PKCS#7 padding. Disabled in FIPS mode. |
+| `CKM_DES3_ECB` | Triple-DES ECB mode. |
+| `CKM_DES3_CBC` | Triple-DES CBC mode. |
+| `CKM_DES3_CBC_PAD` | Triple-DES CBC with PKCS#7 padding. Wrapping also supported (added in SoftHSM 2.7.0). |
+
+  </Accordion>
+  <Accordion title="Key derivation and MAC">
+
+| Mechanism | Description |
+|---|---|
+| `CKM_DES_ECB_ENCRYPT_DATA` | Derive a key by encrypting data with single-DES ECB. Disabled in FIPS mode. |
+| `CKM_DES_CBC_ENCRYPT_DATA` | Derive a key by encrypting data with single-DES CBC. Disabled in FIPS mode. |
+| `CKM_DES3_ECB_ENCRYPT_DATA` | Derive a key by encrypting data with Triple-DES ECB. |
+| `CKM_DES3_CBC_ENCRYPT_DATA` | Derive a key by encrypting data with Triple-DES CBC. |
+| `CKM_DES3_CMAC` | Triple-DES Cipher-based MAC. Added in SoftHSM 2.4.0. |
+
+  </Accordion>
+</AccordionGroup>
+
+## Hash (digest)
+
+| Mechanism | Output length | Notes |
+|---|---|---|
+| `CKM_MD5` | 16 bytes | Disabled in FIPS mode |
+| `CKM_SHA_1` | 20 bytes | |
+| `CKM_SHA224` | 28 bytes | |
+| `CKM_SHA256` | 32 bytes | |
+| `CKM_SHA384` | 48 bytes | |
+| `CKM_SHA512` | 64 bytes | |
+
+Digest operations are performed with `C_DigestInit` / `C_Digest` (single-part) or `C_DigestInit` / `C_DigestUpdate` / `C_DigestFinal` (multi-part).
+
+## HMAC
+
+| Mechanism | Underlying hash | Output length | Notes |
+|---|---|---|---|
+| `CKM_MD5_HMAC` | MD5 | 16 bytes | Disabled in FIPS mode |
+| `CKM_SHA_1_HMAC` | SHA-1 | 20 bytes | |
+| `CKM_SHA224_HMAC` | SHA-224 | 28 bytes | |
+| `CKM_SHA256_HMAC` | SHA-256 | 32 bytes | |
+| `CKM_SHA384_HMAC` | SHA-384 | 48 bytes | |
+| `CKM_SHA512_HMAC` | SHA-512 | 64 bytes | |
+
+<Info>
+Per PKCS#11 3.0, the minimum HMAC key size is equal to the hash output length. SoftHSM enforces this lower bound when initializing an HMAC operation.
+</Info>
+
+## GOST
+
+<Note>
+GOST mechanisms require `--enable-gost` at build time. This is a compile-time optional feature and is not available in standard binary packages.
+</Note>
+
+| Mechanism | Description |
+|---|---|
+| `CKM_GOSTR3410_KEY_PAIR_GEN` | Generate a GOST R 34.10-2001 key pair |
+| `CKM_GOSTR3410` | GOST R 34.10-2001 raw sign/verify |
+| `CKM_GOSTR3410_WITH_GOSTR3411` | GOST R 34.10-2001 with GOST R 34.11-94 hash |
+| `CKM_GOSTR3411` | GOST R 34.11-94 (Streebog) hash |
+| `CKM_GOSTR3411_HMAC` | HMAC using GOST R 34.11-94 |
+
+## ML-DSA (Module-Lattice Digital Signature Algorithm)
+
+<Note>
+ML-DSA is a post-quantum lattice-based signature algorithm (formerly known as CRYSTALS-Dilithium, standardized as FIPS 204). These mechanisms require SoftHSM to be built against OpenSSL 3.x with ML-DSA support enabled (`WITH_ML_DSA`).
+</Note>
+
+| Mechanism | Description |
+|---|---|
+| `CKM_ML_DSA_KEY_PAIR_GEN` | Generate an ML-DSA key pair. The parameter set (ML-DSA-44, ML-DSA-65, ML-DSA-87) is selected via the key template. |
+| `CKM_ML_DSA` | ML-DSA sign/verify. |
+
+## Generic secret key generation
+
+| Mechanism | Description |
+|---|---|
+| `CKM_GENERIC_SECRET_KEY_GEN` | Generate a generic secret key of arbitrary length for use as HMAC or derivation base keys. |
+
+## Key derivation utilities
+
+These mechanisms are used as part of derived key construction and are available unconditionally.
+
+| Mechanism | Description |
+|---|---|
+| `CKM_CONCATENATE_DATA_AND_BASE` | Derive a key by prepending data to a base key value. |
+| `CKM_CONCATENATE_BASE_AND_DATA` | Derive a key by appending data to a base key value. |
+| `CKM_CONCATENATE_BASE_AND_KEY` | Derive a key by concatenating two key values. |
+
+## Random number generation
+
+SoftHSM uses the RNG provided by the underlying cryptographic library (OpenSSL or Botan). Applications interact with it through the standard PKCS#11 functions:
+
+| Function | Description |
+|---|---|
+| `C_GenerateRandom` | Fill a buffer with cryptographically random bytes |
+| `C_SeedRandom` | Mix additional entropy into the RNG state |
+
+There is no separate `CKM_` constant for RNG; random generation is invoked directly via these functions rather than through the mechanism API.
+
+## Mechanism availability by build configuration
+
+| Build flag | Mechanisms enabled |
+|---|---|
+| _(always on)_ | RSA, DSA, DH, 3DES, AES, SHA-1/224/256/384/512, HMAC, generic secret |
+| `WITH_FIPS` disabled | MD5, `CKM_MD5_HMAC`, `CKM_MD5_RSA_PKCS`, single-DES |
+| `WITH_ECC` | `CKM_EC_KEY_PAIR_GEN`, `CKM_ECDSA*`, `CKM_ECDH1_DERIVE` |
+| `WITH_EDDSA` | `CKM_EC_EDWARDS_KEY_PAIR_GEN`, `CKM_EDDSA`, `CKM_ECDH1_DERIVE` |
+| `WITH_GOST` | `CKM_GOSTR3410*`, `CKM_GOSTR3411*` |
+| `WITH_ML_DSA` | `CKM_ML_DSA_KEY_PAIR_GEN`, `CKM_ML_DSA` |
+| `WITH_RAW_PSS` | `CKM_RSA_PKCS_PSS` (raw, pre-hashed) |
+| `HAVE_AES_KEY_WRAP_PAD` | `CKM_AES_KEY_WRAP_PAD` |
+
+<Tip>
+To restrict which mechanisms are active at runtime without recompiling, set `slots.mechanisms` in `softhsm2.conf` to a comma-separated list of mechanism names (e.g., `CKM_AES_GCM,CKM_SHA256_RSA_PKCS`). The default value `ALL` enables every compiled-in mechanism.
+</Tip>

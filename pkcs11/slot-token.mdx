@@ -1,0 +1,339 @@
+---
+title: "Slot and token management"
+description: "PKCS#11 functions for managing slots, tokens, and PINs in SoftHSM v2"
+---
+
+Slots are logical containers that hold tokens. In SoftHSM v2 each initialized token occupies one slot, and one additional empty slot is always present to allow new token initialization. The functions on this page let you enumerate slots, inspect their properties, and manage the tokens and PINs within them.
+
+## C_GetSlotList
+
+Enumerates the slots available in the system.
+
+```c
+CK_RV C_GetSlotList(
+    CK_BBOOL        tokenPresent,
+    CK_SLOT_ID_PTR  pSlotList,
+    CK_ULONG_PTR    pulCount
+);
+```
+
+<ParamField path="tokenPresent" type="CK_BBOOL" required>
+  If `CK_TRUE`, return only slots that contain a token. If `CK_FALSE`, return all slots including the empty placeholder slot.
+</ParamField>
+
+<ParamField path="pSlotList" type="CK_SLOT_ID_PTR">
+  Pointer to a buffer that receives the array of slot IDs. Pass `NULL_PTR` on the first call to obtain the required count without filling a buffer.
+</ParamField>
+
+<ParamField path="pulCount" type="CK_ULONG_PTR" required>
+  On input, the size of `pSlotList` (ignored when `pSlotList` is `NULL_PTR`). On output, the number of slot IDs written (or the total count when `pSlotList` is `NULL_PTR`).
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_BUFFER_TOO_SMALL`, `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+Call this function twice: once with `pSlotList = NULL_PTR` to get the count, allocate a buffer, then call again to fill it.
+
+---
+
+## C_GetSlotInfo
+
+Returns descriptive information about a single slot.
+
+```c
+CK_RV C_GetSlotInfo(
+    CK_SLOT_ID       slotID,
+    CK_SLOT_INFO_PTR pInfo
+);
+```
+
+<ParamField path="slotID" type="CK_SLOT_ID" required>
+  The ID of the slot to query.
+</ParamField>
+
+<ParamField path="pInfo" type="CK_SLOT_INFO_PTR" required>
+  Pointer to a `CK_SLOT_INFO` structure that receives the slot description, manufacturer ID, hardware/firmware versions, and flags such as `CKF_TOKEN_PRESENT` and `CKF_REMOVABLE_DEVICE`.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SLOT_ID_INVALID`, `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+---
+
+## C_GetTokenInfo
+
+Returns detailed information about the token in a given slot.
+
+```c
+CK_RV C_GetTokenInfo(
+    CK_SLOT_ID        slotID,
+    CK_TOKEN_INFO_PTR pInfo
+);
+```
+
+<ParamField path="slotID" type="CK_SLOT_ID" required>
+  The ID of the slot whose token you want to query.
+</ParamField>
+
+<ParamField path="pInfo" type="CK_TOKEN_INFO_PTR" required>
+  Pointer to a `CK_TOKEN_INFO` structure that receives the token label, manufacturer ID, model, serial number, session counts, PIN lengths, memory statistics, and flags (such as `CKF_TOKEN_INITIALIZED`, `CKF_USER_PIN_INITIALIZED`, `CKF_LOGIN_REQUIRED`).
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SLOT_ID_INVALID`, `CKR_TOKEN_NOT_PRESENT`, `CKR_TOKEN_NOT_RECOGNIZED`, `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+---
+
+## C_GetMechanismList
+
+Returns the list of cryptographic mechanisms supported by a token.
+
+```c
+CK_RV C_GetMechanismList(
+    CK_SLOT_ID             slotID,
+    CK_MECHANISM_TYPE_PTR  pMechanismList,
+    CK_ULONG_PTR           pulCount
+);
+```
+
+<ParamField path="slotID" type="CK_SLOT_ID" required>
+  The ID of the slot whose token's mechanism list you want.
+</ParamField>
+
+<ParamField path="pMechanismList" type="CK_MECHANISM_TYPE_PTR">
+  Buffer to receive the array of `CK_MECHANISM_TYPE` values. Pass `NULL_PTR` on the first call to obtain the count only.
+</ParamField>
+
+<ParamField path="pulCount" type="CK_ULONG_PTR" required>
+  On input, the capacity of `pMechanismList`. On output, the number of mechanisms available.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_BUFFER_TOO_SMALL`, `CKR_SLOT_ID_INVALID`, `CKR_TOKEN_NOT_PRESENT`, `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+SoftHSM v2 supports mechanisms including AES (CBC, GCM, CTR, CCM, key wrap), 3DES, RSA (PKCS, OAEP, PSS), DSA, ECDSA, ECDH, EdDSA, DH, GOST, HMAC (SHA-1/224/256/384/512), and digest algorithms. See [Mechanisms](/pkcs11/mechanisms) for the full list.
+
+---
+
+## C_GetMechanismInfo
+
+Returns information about a specific mechanism supported by a token.
+
+```c
+CK_RV C_GetMechanismInfo(
+    CK_SLOT_ID            slotID,
+    CK_MECHANISM_TYPE     type,
+    CK_MECHANISM_INFO_PTR pInfo
+);
+```
+
+<ParamField path="slotID" type="CK_SLOT_ID" required>
+  The ID of the slot whose token supports the mechanism.
+</ParamField>
+
+<ParamField path="type" type="CK_MECHANISM_TYPE" required>
+  The mechanism type to query, for example `CKM_RSA_PKCS` or `CKM_AES_CBC`.
+</ParamField>
+
+<ParamField path="pInfo" type="CK_MECHANISM_INFO_PTR" required>
+  Pointer to a `CK_MECHANISM_INFO` structure that receives the minimum and maximum key sizes (in bits) and the flags indicating what operations the mechanism supports (`CKF_ENCRYPT`, `CKF_SIGN`, `CKF_GENERATE_KEY_PAIR`, and so on).
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_MECHANISM_INVALID`, `CKR_SLOT_ID_INVALID`, `CKR_TOKEN_NOT_PRESENT`, `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+---
+
+## C_InitToken
+
+Initializes a token in a slot, erasing any previously stored objects and resetting all PINs.
+
+```c
+CK_RV C_InitToken(
+    CK_SLOT_ID       slotID,
+    CK_UTF8CHAR_PTR  pPin,
+    CK_ULONG         ulPinLen,
+    CK_UTF8CHAR_PTR  pLabel
+);
+```
+
+<ParamField path="slotID" type="CK_SLOT_ID" required>
+  The ID of the slot to initialize. If the slot already contains a token, all objects on the token are destroyed.
+</ParamField>
+
+<ParamField path="pPin" type="CK_UTF8CHAR_PTR" required>
+  The Security Officer (SO) PIN as a UTF-8 byte array. Not null-terminated.
+</ParamField>
+
+<ParamField path="ulPinLen" type="CK_ULONG" required>
+  Length in bytes of `pPin`.
+</ParamField>
+
+<ParamField path="pLabel" type="CK_UTF8CHAR_PTR" required>
+  A 32-byte space-padded UTF-8 label for the token. Shorter labels must be right-padded with spaces (`0x20`).
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SLOT_ID_INVALID`, `CKR_PIN_INCORRECT` (wrong SO PIN when re-initializing), `CKR_SESSION_EXISTS` (open sessions prevent re-initialization), `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+<Warning>
+  Initializing a token that already contains objects **permanently destroys all stored keys and data**. Close all sessions on the slot before calling `C_InitToken`.
+</Warning>
+
+After `C_InitToken` succeeds the token is in an uninitialized state — the user PIN does not yet exist. Call `C_InitPIN` in an SO session to set it.
+
+---
+
+## C_InitPIN
+
+Sets the user PIN for a token. Must be called from a read/write SO session opened after `C_InitToken`.
+
+```c
+CK_RV C_InitPIN(
+    CK_SESSION_HANDLE  hSession,
+    CK_UTF8CHAR_PTR    pPin,
+    CK_ULONG           ulPinLen
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of an open read/write SO session (`CKS_RW_SO_FUNCTIONS` state).
+</ParamField>
+
+<ParamField path="pPin" type="CK_UTF8CHAR_PTR" required>
+  The initial user PIN as a UTF-8 byte array. Not null-terminated.
+</ParamField>
+
+<ParamField path="ulPinLen" type="CK_ULONG" required>
+  Length in bytes of `pPin`. Must fall within the token's `ulMinPinLen` and `ulMaxPinLen` as reported by `C_GetTokenInfo`.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SESSION_HANDLE_INVALID`, `CKR_USER_NOT_LOGGED_IN` (session is not an SO session), `CKR_PIN_LEN_RANGE`, `CKR_TOKEN_WRITE_PROTECTED`, `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+---
+
+## C_SetPIN
+
+Changes the PIN of the currently logged-in user, or the SO PIN when called from an SO session.
+
+```c
+CK_RV C_SetPIN(
+    CK_SESSION_HANDLE  hSession,
+    CK_UTF8CHAR_PTR    pOldPin,
+    CK_ULONG           ulOldLen,
+    CK_UTF8CHAR_PTR    pNewPin,
+    CK_ULONG           ulNewLen
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of an open read/write session. The session must be in `CKS_RW_USER_FUNCTIONS` or `CKS_RW_SO_FUNCTIONS` state.
+</ParamField>
+
+<ParamField path="pOldPin" type="CK_UTF8CHAR_PTR" required>
+  The current PIN as a UTF-8 byte array.
+</ParamField>
+
+<ParamField path="ulOldLen" type="CK_ULONG" required>
+  Length in bytes of `pOldPin`.
+</ParamField>
+
+<ParamField path="pNewPin" type="CK_UTF8CHAR_PTR" required>
+  The new PIN as a UTF-8 byte array.
+</ParamField>
+
+<ParamField path="ulNewLen" type="CK_ULONG" required>
+  Length in bytes of `pNewPin`. Must satisfy the token's PIN length constraints.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SESSION_HANDLE_INVALID`, `CKR_PIN_INCORRECT`, `CKR_PIN_LEN_RANGE`, `CKR_SESSION_READ_ONLY`, `CKR_TOKEN_WRITE_PROTECTED`, `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+---
+
+## C_WaitForSlotEvent
+
+Blocks until a slot event (such as a token insertion or removal) occurs, or returns immediately if one is already pending.
+
+```c
+CK_RV C_WaitForSlotEvent(
+    CK_FLAGS      flags,
+    CK_SLOT_ID_PTR pSlot,
+    CK_VOID_PTR   pReserved
+);
+```
+
+<ParamField path="flags" type="CK_FLAGS" required>
+  If `CKF_DONT_BLOCK` is set, the function returns immediately even if no event has occurred, returning `CKR_NO_EVENT`. If 0, the call blocks.
+</ParamField>
+
+<ParamField path="pSlot" type="CK_SLOT_ID_PTR" required>
+  Receives the ID of the slot on which the event occurred.
+</ParamField>
+
+<ParamField path="pReserved" type="CK_VOID_PTR">
+  Reserved for future use. Must be `NULL_PTR`.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_NO_EVENT` (non-blocking, no event pending), `CKR_FUNCTION_NOT_SUPPORTED` (SoftHSM v2 does not generate hardware slot events; use polling with `CKF_DONT_BLOCK`), `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+<Info>
+  SoftHSM v2 does not generate real-time slot events because there is no physical hardware. Use `CKF_DONT_BLOCK` and poll `C_GetSlotList` or `C_GetTokenInfo` to detect changes.
+</Info>
+
+---
+
+## Example: slot enumeration
+
+The following example enumerates all slots that contain a token and prints their labels.
+
+```c
+#include <stdio.h>
+#include <string.h>
+#include "pkcs11.h"
+
+void list_tokens(CK_FUNCTION_LIST_PTR p11) {
+    CK_RV rv;
+    CK_ULONG slot_count = 0;
+    CK_SLOT_ID_PTR slots = NULL;
+
+    /* Step 1: get the number of slots with a token present */
+    rv = p11->C_GetSlotList(CK_TRUE, NULL_PTR, &slot_count);
+    if (rv != CKR_OK || slot_count == 0) {
+        fprintf(stderr, "No tokens found (rv=0x%lx)\n", rv);
+        return;
+    }
+
+    /* Step 2: allocate and fill the slot list */
+    slots = malloc(slot_count * sizeof(CK_SLOT_ID));
+    rv = p11->C_GetSlotList(CK_TRUE, slots, &slot_count);
+    if (rv != CKR_OK) {
+        fprintf(stderr, "C_GetSlotList failed: 0x%lx\n", rv);
+        free(slots);
+        return;
+    }
+
+    /* Step 3: print token info for each slot */
+    for (CK_ULONG i = 0; i < slot_count; i++) {
+        CK_TOKEN_INFO info;
+        rv = p11->C_GetTokenInfo(slots[i], &info);
+        if (rv == CKR_OK) {
+            /* label is 32 bytes, space-padded, not null-terminated */
+            char label[33];
+            memcpy(label, info.label, 32);
+            label[32] = '\0';
+            printf("Slot %lu: %.32s\n", slots[i], label);
+        }
+    }
+
+    free(slots);
+}
+```
+
+<Steps>
+  <Step title="Call C_GetSlotList with NULL_PTR">
+    Pass `NULL_PTR` as `pSlotList` to retrieve the count of available slots without allocating memory.
+  </Step>
+  <Step title="Allocate the slot buffer">
+    Allocate `count * sizeof(CK_SLOT_ID)` bytes.
+  </Step>
+  <Step title="Call C_GetSlotList again">
+    Pass the allocated buffer and count. The function fills the array with slot IDs.
+  </Step>
+  <Step title="Iterate and query each slot">
+    Call `C_GetTokenInfo` or `C_GetSlotInfo` for each slot ID to retrieve details.
+  </Step>
+</Steps>

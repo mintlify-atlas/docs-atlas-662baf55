@@ -1,0 +1,95 @@
+---
+title: "Crypto backends overview"
+description: "Choose between OpenSSL and Botan cryptographic backends for SoftHSM v2"
+---
+
+SoftHSM v2 does not implement cryptographic primitives itself. Instead, it delegates all cryptographic operations to an external library through the `CryptoFactory` abstraction. You choose which library to use at compile time.
+
+## The CryptoFactory abstraction
+
+`CryptoFactory` is an abstract C++ base class that acts as a factory for all algorithm implementations. The rest of SoftHSM calls only the `CryptoFactory` interface — it never calls an OpenSSL or Botan API directly. When you build SoftHSM, exactly one concrete subclass is compiled in:
+
+| Factory class | Backend |
+|---|---|
+| `OSSLCryptoFactory` | OpenSSL |
+| `BotanCryptoFactory` | Botan |
+
+The factory exposes four categories of algorithm objects:
+
+- **Symmetric** — `getSymmetricAlgorithm()` — AES, 3DES
+- **Asymmetric** — `getAsymmetricAlgorithm()` — RSA, DSA, ECDSA, ECDH, EdDSA, DH, GOST, ML-DSA
+- **Hash** — `getHashAlgorithm()` — SHA-1, SHA-224, SHA-256, SHA-384, SHA-512, MD5, GOST R 34.11-94
+- **MAC** — `getMacAlgorithm()` — HMAC variants, CMAC
+
+A global RNG is also provided via `getRNG()`.
+
+<Warning>
+The crypto backend is **not pluggable at runtime**. It is selected at compile time and baked into the shared library. To switch backends you must recompile SoftHSM.
+</Warning>
+
+## Available backends
+
+<CardGroup cols={2}>
+  <Card title="OpenSSL" icon="lock" href="/crypto/openssl">
+    The default backend. Supports all algorithms including post-quantum ML-DSA (via OpenSSL 3.x) and FIPS 140-2 operation.
+  </Card>
+  <Card title="Botan" icon="shield" href="/crypto/botan">
+    An alternative backend based on the Botan C++ library. Supports all classical algorithms. Does not currently support ML-DSA.
+  </Card>
+</CardGroup>
+
+## Compile-time backend selection
+
+<Tabs>
+  <Tab title="Autotools">
+    ```bash
+    ./configure --with-crypto-backend=openssl   # default
+    ./configure --with-crypto-backend=botan
+    ```
+  </Tab>
+  <Tab title="CMake">
+    ```bash
+    cmake -DWITH_CRYPTO_BACKEND=openssl .   # default
+    cmake -DWITH_CRYPTO_BACKEND=botan .
+    ```
+  </Tab>
+</Tabs>
+
+If `--with-crypto-backend` is omitted, the build system defaults to OpenSSL.
+
+## Algorithm support by backend
+
+| Algorithm | OpenSSL | Botan |
+|---|---|---|
+| RSA | Yes | Yes |
+| DSA | Yes | Yes |
+| ECDSA | Yes | Yes |
+| ECDH | Yes | Yes |
+| EdDSA | Yes | Yes |
+| DH | Yes | Yes |
+| GOST | Yes (if enabled) | Yes (if enabled) |
+| ML-DSA (post-quantum) | Yes (OpenSSL 3.x) | No |
+| AES | Yes | Yes |
+| 3DES | Yes | Yes |
+| SHA-1 / SHA-2 family | Yes | Yes |
+| MD5 | Yes | Yes |
+| HMAC | Yes | Yes |
+| CMAC | Yes | No |
+
+## When to choose each backend
+
+**Choose OpenSSL when:**
+
+- You need post-quantum ML-DSA support.
+- You need FIPS 140-2 compliant operation (see [FIPS 140-2](/crypto/fips)).
+- You need CMAC.
+- OpenSSL is already a dependency in your environment.
+
+**Choose Botan when:**
+
+- Your environment already ships Botan and you want to avoid an OpenSSL dependency.
+- You are comfortable without ML-DSA or CMAC.
+
+<Note>
+If you use Botan, use version 2.6.0 or later. This version introduced performance improvements for public key operations.
+</Note>

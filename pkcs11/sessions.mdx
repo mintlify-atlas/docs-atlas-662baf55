@@ -1,0 +1,327 @@
+---
+title: "Session management"
+description: "PKCS#11 session lifecycle — opening, authenticating, and closing sessions"
+---
+
+A session is an application's connection to a token. All cryptographic operations require an open session. Sessions can be read-only or read/write, and they can be public (unauthenticated) or require a login. SoftHSM v2 supports multiple concurrent sessions on the same slot.
+
+## Session flags
+
+| Flag | Value | Description |
+|---|---|---|
+| `CKF_RW_SESSION` | `0x00000002` | Open a read/write session. Without this flag the session is read-only. |
+| `CKF_SERIAL_SESSION` | `0x00000004` | Required by PKCS#11. Must always be set when calling `C_OpenSession`. |
+
+## User types
+
+| Constant | Description |
+|---|---|
+| `CKU_USER` | Normal user. Can perform cryptographic operations and access private objects after login. |
+| `CKU_SO` | Security Officer. Used for token administration (setting the user PIN). Cannot access user private objects. |
+| `CKU_CONTEXT_SPECIFIC` | Context-specific login used in certain multi-step operations. |
+
+## Session states
+
+The state of a session determines which objects are visible and which operations are permitted.
+
+| State | Description |
+|---|---|
+| `CKS_RO_PUBLIC_SESSION` | Read-only, not logged in. Only public objects are accessible. |
+| `CKS_RW_PUBLIC_SESSION` | Read/write, not logged in. Public objects can be created and modified. |
+| `CKS_RO_USER_FUNCTIONS` | Read-only user session. User and public objects accessible, no write. |
+| `CKS_RW_USER_FUNCTIONS` | Read/write user session. Full access to user and public objects. |
+| `CKS_RW_SO_FUNCTIONS` | Read/write SO session. Required to call `C_InitPIN` or `C_SetPIN` as SO. |
+
+---
+
+## C_OpenSession
+
+Opens a session on the specified slot.
+
+```c
+CK_RV C_OpenSession(
+    CK_SLOT_ID           slotID,
+    CK_FLAGS             flags,
+    CK_VOID_PTR          pApplication,
+    CK_NOTIFY            notify,
+    CK_SESSION_HANDLE_PTR phSession
+);
+```
+
+<ParamField path="slotID" type="CK_SLOT_ID" required>
+  The ID of the slot on which to open the session. The slot must contain an initialized token.
+</ParamField>
+
+<ParamField path="flags" type="CK_FLAGS" required>
+  Session flags. `CKF_SERIAL_SESSION` must always be set. Include `CKF_RW_SESSION` for a read/write session.
+</ParamField>
+
+<ParamField path="pApplication" type="CK_VOID_PTR">
+  An application-defined pointer passed to the `notify` callback. May be `NULL_PTR`.
+</ParamField>
+
+<ParamField path="notify" type="CK_NOTIFY">
+  A callback function for notifications such as surrender events. May be `NULL_PTR`; SoftHSM v2 does not currently invoke this callback.
+</ParamField>
+
+<ParamField path="phSession" type="CK_SESSION_HANDLE_PTR" required>
+  Receives the handle of the newly opened session.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SLOT_ID_INVALID`, `CKR_TOKEN_NOT_PRESENT`, `CKR_TOKEN_NOT_RECOGNIZED`, `CKR_SESSION_COUNT` (implementation limit reached), `CKR_SESSION_PARALLEL_NOT_SUPPORTED` (if `CKF_SERIAL_SESSION` is missing), `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+---
+
+## C_CloseSession
+
+Closes a single session and releases its resources.
+
+```c
+CK_RV C_CloseSession(
+    CK_SESSION_HANDLE hSession
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of the session to close.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SESSION_HANDLE_INVALID`, `CKR_CRYPTOKI_NOT_INITIALIZED`.
+
+Closing a session destroys any session objects created within it and terminates any in-progress cryptographic operations.
+
+---
+
+## C_CloseAllSessions
+
+Closes all sessions open on a given slot.
+
+```c
+CK_RV C_CloseAllSessions(
+    CK_SLOT_ID slotID
+);
+```
+
+<ParamField path="slotID" type="CK_SLOT_ID" required>
+  The ID of the slot whose sessions should all be closed.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SLOT_ID_INVALID`, `CKR_CRYPTOKI_NOT_INITIALIZED`.
+
+Useful before calling `C_InitToken`, which requires that no sessions are open on the target slot.
+
+---
+
+## C_GetSessionInfo
+
+Returns the current state and metadata of a session.
+
+```c
+CK_RV C_GetSessionInfo(
+    CK_SESSION_HANDLE  hSession,
+    CK_SESSION_INFO_PTR pInfo
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of the session to query.
+</ParamField>
+
+<ParamField path="pInfo" type="CK_SESSION_INFO_PTR" required>
+  Pointer to a `CK_SESSION_INFO` structure that receives the slot ID, session state (`CKS_*`), flags, and device error code.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SESSION_HANDLE_INVALID`, `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+---
+
+## C_GetOperationState / C_SetOperationState
+
+Save and restore the cryptographic state of a session. Useful for multi-part operations that must be suspended and resumed.
+
+### C_GetOperationState
+
+```c
+CK_RV C_GetOperationState(
+    CK_SESSION_HANDLE  hSession,
+    CK_BYTE_PTR        pOperationState,
+    CK_ULONG_PTR       pulOperationStateLen
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of the session whose operation state to save.
+</ParamField>
+
+<ParamField path="pOperationState" type="CK_BYTE_PTR">
+  Buffer that receives the serialized operation state. Pass `NULL_PTR` to obtain the required buffer length.
+</ParamField>
+
+<ParamField path="pulOperationStateLen" type="CK_ULONG_PTR" required>
+  On output, the size in bytes of the operation state.
+</ParamField>
+
+### C_SetOperationState
+
+```c
+CK_RV C_SetOperationState(
+    CK_SESSION_HANDLE  hSession,
+    CK_BYTE_PTR        pOperationState,
+    CK_ULONG           ulOperationStateLen,
+    CK_OBJECT_HANDLE   hEncryptionKey,
+    CK_OBJECT_HANDLE   hAuthenticationKey
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of the target session.
+</ParamField>
+
+<ParamField path="pOperationState" type="CK_BYTE_PTR" required>
+  Buffer containing a previously saved operation state from `C_GetOperationState`.
+</ParamField>
+
+<ParamField path="ulOperationStateLen" type="CK_ULONG" required>
+  Length in bytes of `pOperationState`.
+</ParamField>
+
+<ParamField path="hEncryptionKey" type="CK_OBJECT_HANDLE">
+  Handle of the encryption/decryption key used in the saved operation, or `CK_INVALID_HANDLE` if not applicable.
+</ParamField>
+
+<ParamField path="hAuthenticationKey" type="CK_OBJECT_HANDLE">
+  Handle of the authentication key (MAC key) used in the saved operation, or `CK_INVALID_HANDLE` if not applicable.
+</ParamField>
+
+**Returns (both):** `CKR_OK`, `CKR_SESSION_HANDLE_INVALID`, `CKR_OPERATION_NOT_INITIALIZED`, `CKR_SAVED_STATE_INVALID`, `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+<Note>
+  SoftHSM v2 returns `CKR_FUNCTION_NOT_SUPPORTED` for `C_GetOperationState` and `C_SetOperationState`. These functions are defined in the PKCS#11 standard but are not implemented.
+</Note>
+
+---
+
+## C_Login
+
+Authenticates the user or Security Officer for a session.
+
+```c
+CK_RV C_Login(
+    CK_SESSION_HANDLE  hSession,
+    CK_USER_TYPE       userType,
+    CK_UTF8CHAR_PTR    pPin,
+    CK_ULONG           ulPinLen
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of any open session on the target slot. The login state applies to **all sessions on that slot**, not just this one.
+</ParamField>
+
+<ParamField path="userType" type="CK_USER_TYPE" required>
+  The type of user logging in: `CKU_USER` for the normal user or `CKU_SO` for the Security Officer.
+</ParamField>
+
+<ParamField path="pPin" type="CK_UTF8CHAR_PTR" required>
+  The PIN as a UTF-8 byte array. Not null-terminated.
+</ParamField>
+
+<ParamField path="ulPinLen" type="CK_ULONG" required>
+  Length in bytes of `pPin`.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SESSION_HANDLE_INVALID`, `CKR_USER_ALREADY_LOGGED_IN`, `CKR_USER_ANOTHER_ALREADY_LOGGED_IN` (SO logged in when user tries, or vice versa), `CKR_PIN_INCORRECT`, `CKR_PIN_LOCKED` (too many failed attempts), `CKR_USER_PIN_NOT_INITIALIZED` (user PIN not set yet), `CKR_SESSION_READ_ONLY_EXISTS` (SO login blocked by existing read-only session), `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+<Warning>
+  Login state is per-slot, not per-session. Logging in on one session makes private objects accessible on all other sessions open on the same slot.
+</Warning>
+
+---
+
+## C_Logout
+
+Ends the authenticated session state for the slot.
+
+```c
+CK_RV C_Logout(
+    CK_SESSION_HANDLE hSession
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of any open session on the slot. Logout affects all sessions on the slot.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SESSION_HANDLE_INVALID`, `CKR_USER_NOT_LOGGED_IN`, `CKR_CRYPTOKI_NOT_INITIALIZED`.
+
+After `C_Logout`, all sessions on the slot revert to their public state (`CKS_RO_PUBLIC_SESSION` or `CKS_RW_PUBLIC_SESSION`). Session objects created with `CKA_PRIVATE = CK_TRUE` are destroyed.
+
+---
+
+## Example: open, login, use, and close
+
+```c
+#include <stdio.h>
+#include <string.h>
+#include "pkcs11.h"
+
+int pkcs11_session_example(CK_FUNCTION_LIST_PTR p11, CK_SLOT_ID slot) {
+    CK_SESSION_HANDLE session;
+    CK_RV rv;
+
+    /* Open a read/write user session */
+    rv = p11->C_OpenSession(
+        slot,
+        CKF_SERIAL_SESSION | CKF_RW_SESSION,
+        NULL_PTR,
+        NULL_PTR,
+        &session
+    );
+    if (rv != CKR_OK) {
+        fprintf(stderr, "C_OpenSession failed: 0x%lx\n", rv);
+        return -1;
+    }
+
+    /* Authenticate as normal user */
+    CK_UTF8CHAR pin[] = "userpin";
+    rv = p11->C_Login(session, CKU_USER, pin, strlen((char *)pin));
+    if (rv != CKR_OK) {
+        fprintf(stderr, "C_Login failed: 0x%lx\n", rv);
+        p11->C_CloseSession(session);
+        return -1;
+    }
+
+    /* --- perform cryptographic operations here --- */
+
+    /* Inspect the session state */
+    CK_SESSION_INFO info;
+    rv = p11->C_GetSessionInfo(session, &info);
+    if (rv == CKR_OK) {
+        printf("Session state: %lu\n", info.state);
+        /* CKS_RW_USER_FUNCTIONS == 3 */
+    }
+
+    /* Log out and close */
+    p11->C_Logout(session);
+    p11->C_CloseSession(session);
+    return 0;
+}
+```
+
+<Steps>
+  <Step title="Open a session">
+    Call `C_OpenSession` with `CKF_SERIAL_SESSION | CKF_RW_SESSION`. Store the returned `CK_SESSION_HANDLE`.
+  </Step>
+  <Step title="Log in">
+    Call `C_Login` with `CKU_USER` and the user PIN. This unlocks private objects on the token for all sessions on the slot.
+  </Step>
+  <Step title="Perform operations">
+    Use the session handle with cryptographic or object management functions.
+  </Step>
+  <Step title="Log out">
+    Call `C_Logout` to end the authenticated state.
+  </Step>
+  <Step title="Close the session">
+    Call `C_CloseSession` to release the session handle and destroy any session objects.
+  </Step>
+</Steps>

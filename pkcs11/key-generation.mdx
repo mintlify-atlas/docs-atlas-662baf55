@@ -1,0 +1,287 @@
+---
+title: "Key generation"
+description: "Generate symmetric and asymmetric keys using PKCS#11 in SoftHSM v2"
+---
+
+SoftHSM v2 provides two functions for generating cryptographic keys: `C_GenerateKey` for symmetric keys and `C_GenerateKeyPair` for asymmetric key pairs. Both take a mechanism and a template of `CK_ATTRIBUTE` values that control the generated key's properties.
+
+## Functions
+
+### C_GenerateKey
+
+Generates a symmetric key.
+
+```c
+CK_RV C_GenerateKey(
+    CK_SESSION_HANDLE hSession,
+    CK_MECHANISM_PTR  pMechanism,
+    CK_ATTRIBUTE_PTR  pTemplate,
+    CK_ULONG          ulCount,
+    CK_OBJECT_HANDLE_PTR phKey
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of the open session.
+</ParamField>
+
+<ParamField path="pMechanism" type="CK_MECHANISM_PTR" required>
+  Key generation mechanism, such as `CKM_AES_KEY_GEN`. No mechanism parameters are required for standard symmetric key generation.
+</ParamField>
+
+<ParamField path="pTemplate" type="CK_ATTRIBUTE_PTR" required>
+  Array of `CK_ATTRIBUTE` structures specifying the new key's attributes. Must include at minimum `CKA_VALUE_LEN` for AES keys.
+</ParamField>
+
+<ParamField path="ulCount" type="CK_ULONG" required>
+  Number of attributes in `pTemplate`.
+</ParamField>
+
+<ParamField path="phKey" type="CK_OBJECT_HANDLE_PTR" required>
+  Receives the handle of the newly created key object.
+</ParamField>
+
+---
+
+### C_GenerateKeyPair
+
+Generates an asymmetric key pair (public key + private key).
+
+```c
+CK_RV C_GenerateKeyPair(
+    CK_SESSION_HANDLE    hSession,
+    CK_MECHANISM_PTR     pMechanism,
+    CK_ATTRIBUTE_PTR     pPublicKeyTemplate,
+    CK_ULONG             ulPublicKeyAttributeCount,
+    CK_ATTRIBUTE_PTR     pPrivateKeyTemplate,
+    CK_ULONG             ulPrivateKeyAttributeCount,
+    CK_OBJECT_HANDLE_PTR phPublicKey,
+    CK_OBJECT_HANDLE_PTR phPrivateKey
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of the open session.
+</ParamField>
+
+<ParamField path="pMechanism" type="CK_MECHANISM_PTR" required>
+  Key pair generation mechanism, such as `CKM_RSA_PKCS_KEY_PAIR_GEN` or `CKM_EC_KEY_PAIR_GEN`. No mechanism parameters are used.
+</ParamField>
+
+<ParamField path="pPublicKeyTemplate" type="CK_ATTRIBUTE_PTR" required>
+  Attributes for the public key object. For RSA, include `CKA_MODULUS_BITS` and optionally `CKA_PUBLIC_EXPONENT`. For EC, include `CKA_EC_PARAMS`.
+</ParamField>
+
+<ParamField path="ulPublicKeyAttributeCount" type="CK_ULONG" required>
+  Number of public key attributes.
+</ParamField>
+
+<ParamField path="pPrivateKeyTemplate" type="CK_ATTRIBUTE_PTR" required>
+  Attributes for the private key object. Typically includes `CKA_SENSITIVE`, `CKA_EXTRACTABLE`, `CKA_SIGN`, etc.
+</ParamField>
+
+<ParamField path="ulPrivateKeyAttributeCount" type="CK_ULONG" required>
+  Number of private key attributes.
+</ParamField>
+
+<ParamField path="phPublicKey" type="CK_OBJECT_HANDLE_PTR" required>
+  Receives the handle of the generated public key.
+</ParamField>
+
+<ParamField path="phPrivateKey" type="CK_OBJECT_HANDLE_PTR" required>
+  Receives the handle of the generated private key.
+</ParamField>
+
+---
+
+## Supported mechanisms
+
+### Symmetric key generation
+
+| Mechanism | Key type | Required template attributes |
+|---|---|---|
+| `CKM_AES_KEY_GEN` | `CKK_AES` | `CKA_VALUE_LEN` (16, 24, or 32) |
+| `CKM_DES_KEY_GEN` | `CKK_DES` | None (key length is fixed at 8 bytes) |
+| `CKM_DES2_KEY_GEN` | `CKK_DES2` | None (key length is fixed at 16 bytes) |
+| `CKM_DES3_KEY_GEN` | `CKK_DES3` | None (key length is fixed at 24 bytes) |
+| `CKM_GENERIC_SECRET_KEY_GEN` | `CKK_GENERIC_SECRET` | `CKA_VALUE_LEN` |
+
+### Asymmetric key pair generation
+
+| Mechanism | Key type | Required template attributes |
+|---|---|---|
+| `CKM_RSA_PKCS_KEY_PAIR_GEN` | `CKK_RSA` | `CKA_MODULUS_BITS` in the public template |
+| `CKM_DSA_KEY_PAIR_GEN` | `CKK_DSA` | DSA domain parameters (`CKA_PRIME`, `CKA_SUBPRIME`, `CKA_BASE`) in the public template |
+| `CKM_DH_PKCS_KEY_PAIR_GEN` | `CKK_DH` | DH parameters in the public template |
+| `CKM_EC_KEY_PAIR_GEN` | `CKK_EC` | `CKA_EC_PARAMS` (DER-encoded OID) in the public template |
+| `CKM_EC_EDWARDS_KEY_PAIR_GEN` | `CKK_EC_EDWARDS` | `CKA_EC_PARAMS` in the public template; requires `WITH_EDDSA` build |
+| `CKM_GOSTR3410_KEY_PAIR_GEN` | `CKK_GOSTR3410` | GOST parameters; requires `WITH_GOST` build |
+| `CKM_ML_DSA_KEY_PAIR_GEN` | `CKK_ML_DSA` | ML-DSA parameter set in the public template; requires `WITH_ML_DSA` build |
+
+---
+
+## Key attributes
+
+### Common attributes for all keys
+
+| Attribute | Type | Default | Description |
+|---|---|---|---|
+| `CKA_TOKEN` | `CK_BBOOL` | `CK_FALSE` | If `CK_TRUE`, the key is stored persistently on the token |
+| `CKA_PRIVATE` | `CK_BBOOL` | Public key: `CK_FALSE`; Private key: `CK_TRUE` | If `CK_TRUE`, the user must be logged in to access the key |
+| `CKA_LABEL` | `CK_UTF8CHAR[]` | Empty | Human-readable label |
+| `CKA_ID` | `CK_BYTE[]` | Empty | Application-defined key identifier |
+| `CKA_SENSITIVE` | `CK_BBOOL` | `CK_FALSE` | If `CK_TRUE`, `CKA_VALUE` cannot be read via `C_GetAttributeValue` |
+| `CKA_EXTRACTABLE` | `CK_BBOOL` | `CK_TRUE` | If `CK_FALSE`, the key cannot be wrapped out of the token |
+| `CKA_ENCRYPT` | `CK_BBOOL` | `CK_FALSE` | Permits use with `C_EncryptInit` |
+| `CKA_DECRYPT` | `CK_BBOOL` | `CK_FALSE` | Permits use with `C_DecryptInit` |
+| `CKA_SIGN` | `CK_BBOOL` | `CK_FALSE` | Permits use with `C_SignInit` |
+| `CKA_VERIFY` | `CK_BBOOL` | `CK_FALSE` | Permits use with `C_VerifyInit` |
+| `CKA_WRAP` | `CK_BBOOL` | `CK_FALSE` | Permits use with `C_WrapKey` |
+| `CKA_UNWRAP` | `CK_BBOOL` | `CK_FALSE` | Permits use with `C_UnwrapKey` |
+| `CKA_DERIVE` | `CK_BBOOL` | `CK_FALSE` | Permits use with `C_DeriveKey` |
+
+### AES key attributes
+
+| Attribute | Description |
+|---|---|
+| `CKA_VALUE_LEN` | Key length in bytes: 16 (AES-128), 24 (AES-192), or 32 (AES-256) |
+
+### RSA key pair attributes
+
+| Attribute | Applies to | Description |
+|---|---|---|
+| `CKA_MODULUS_BITS` | Public template | RSA modulus size in bits (e.g., 2048, 3072, 4096) |
+| `CKA_PUBLIC_EXPONENT` | Public template | Public exponent as a big-endian byte string; defaults to 65537 if omitted |
+
+### EC key pair attributes
+
+| Attribute | Applies to | Description |
+|---|---|---|
+| `CKA_EC_PARAMS` | Public template | DER-encoded OID of the named curve (e.g., P-256, P-384, P-521) |
+
+<Note>
+The DER encoding for P-256 is `\x06\x08\x2a\x86\x48\xce\x3d\x03\x01\x07`. Libraries such as libp11 or OpenSSL's `OBJ_txt2oid` can produce these OID encodings.
+</Note>
+
+---
+
+## Error codes
+
+| Return value | Meaning |
+|---|---|
+| `CKR_OK` | Success |
+| `CKR_ARGUMENTS_BAD` | A required argument is `NULL_PTR` |
+| `CKR_MECHANISM_INVALID` | The mechanism is not supported |
+| `CKR_TEMPLATE_INCOMPLETE` | A required attribute is missing from the template |
+| `CKR_TEMPLATE_INCONSISTENT` | Template attributes conflict with the mechanism |
+| `CKR_ATTRIBUTE_VALUE_INVALID` | An attribute value is out of range |
+| `CKR_SESSION_READ_ONLY` | Token key requested in a read-only session |
+| `CKR_USER_NOT_LOGGED_IN` | Private key requested without logging in |
+
+---
+
+## Examples
+
+### Generate an RSA-2048 key pair
+
+```c
+#include <pkcs11.h>
+
+void generate_rsa_2048(CK_SESSION_HANDLE hSession,
+                       CK_OBJECT_HANDLE *phPublicKey,
+                       CK_OBJECT_HANDLE *phPrivateKey)
+{
+    CK_MECHANISM mechanism = { CKM_RSA_PKCS_KEY_PAIR_GEN, NULL_PTR, 0 };
+
+    CK_ULONG modulusBits = 2048;
+    CK_BYTE publicExponent[] = { 0x01, 0x00, 0x01 }; /* 65537 */
+    CK_BBOOL ckTrue  = CK_TRUE;
+    CK_BBOOL ckFalse = CK_FALSE;
+
+    CK_ATTRIBUTE pubTemplate[] = {
+        { CKA_MODULUS_BITS,    &modulusBits,    sizeof(modulusBits) },
+        { CKA_PUBLIC_EXPONENT, publicExponent,  sizeof(publicExponent) },
+        { CKA_VERIFY,          &ckTrue,         sizeof(ckTrue) },
+        { CKA_TOKEN,           &ckFalse,        sizeof(ckFalse) },
+    };
+
+    CK_ATTRIBUTE privTemplate[] = {
+        { CKA_SIGN,        &ckTrue,  sizeof(ckTrue) },
+        { CKA_SENSITIVE,   &ckTrue,  sizeof(ckTrue) },
+        { CKA_EXTRACTABLE, &ckFalse, sizeof(ckFalse) },
+        { CKA_TOKEN,       &ckFalse, sizeof(ckFalse) },
+    };
+
+    CK_RV rv = C_GenerateKeyPair(
+        hSession,
+        &mechanism,
+        pubTemplate,  4,
+        privTemplate, 4,
+        phPublicKey, phPrivateKey
+    );
+    /* rv == CKR_OK on success */
+}
+```
+
+### Generate an AES-256 key
+
+```c
+void generate_aes_256(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE *phKey)
+{
+    CK_MECHANISM mechanism = { CKM_AES_KEY_GEN, NULL_PTR, 0 };
+
+    CK_ULONG keyLen  = 32; /* 256 bits */
+    CK_BBOOL ckTrue  = CK_TRUE;
+    CK_BBOOL ckFalse = CK_FALSE;
+
+    CK_ATTRIBUTE tmpl[] = {
+        { CKA_VALUE_LEN, &keyLen,  sizeof(keyLen) },
+        { CKA_ENCRYPT,   &ckTrue,  sizeof(ckTrue) },
+        { CKA_DECRYPT,   &ckTrue,  sizeof(ckTrue) },
+        { CKA_TOKEN,     &ckFalse, sizeof(ckFalse) },
+    };
+
+    CK_RV rv = C_GenerateKey(hSession, &mechanism, tmpl, 4, phKey);
+    /* rv == CKR_OK on success */
+}
+```
+
+### Generate an EC P-256 key pair
+
+```c
+void generate_ec_p256(CK_SESSION_HANDLE hSession,
+                      CK_OBJECT_HANDLE *phPublicKey,
+                      CK_OBJECT_HANDLE *phPrivateKey)
+{
+    CK_MECHANISM mechanism = { CKM_EC_KEY_PAIR_GEN, NULL_PTR, 0 };
+
+    /* DER encoding of the OID for prime256v1 (P-256) */
+    CK_BYTE ecParams[] = {
+        0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07
+    };
+    CK_BBOOL ckTrue  = CK_TRUE;
+    CK_BBOOL ckFalse = CK_FALSE;
+
+    CK_ATTRIBUTE pubTemplate[] = {
+        { CKA_EC_PARAMS, ecParams, sizeof(ecParams) },
+        { CKA_VERIFY,    &ckTrue,  sizeof(ckTrue) },
+        { CKA_TOKEN,     &ckFalse, sizeof(ckFalse) },
+    };
+
+    CK_ATTRIBUTE privTemplate[] = {
+        { CKA_SIGN,        &ckTrue,  sizeof(ckTrue) },
+        { CKA_SENSITIVE,   &ckTrue,  sizeof(ckTrue) },
+        { CKA_EXTRACTABLE, &ckFalse, sizeof(ckFalse) },
+        { CKA_TOKEN,       &ckFalse, sizeof(ckFalse) },
+    };
+
+    CK_RV rv = C_GenerateKeyPair(
+        hSession,
+        &mechanism,
+        pubTemplate,  3,
+        privTemplate, 4,
+        phPublicKey, phPrivateKey
+    );
+    /* rv == CKR_OK on success */
+}
+```

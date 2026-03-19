@@ -1,0 +1,96 @@
+---
+title: "Monitoring and logging"
+description: "Monitor SoftHSM v2 log output and operational health"
+---
+
+## Log output destination
+
+SoftHSM writes all log output to the system log:
+
+- **Linux / macOS** — syslog (typically `/var/log/syslog` or `/var/log/messages`, depending on the distribution)
+- **Windows** — Windows Event Log
+
+No separate log file is written by default. Use your system's syslog configuration to redirect or forward SoftHSM messages as needed.
+
+## Log levels
+
+The log level is set in `softhsm2.conf`:
+
+```ini
+# ERROR, WARNING, INFO, DEBUG
+log.level = INFO
+```
+
+The default in the sample configuration is `ERROR`. Four levels are available:
+
+| Level | Description |
+|---|---|
+| `ERROR` | Failures that prevent an operation from completing — invalid arguments, allocation failures, PKCS#11 error returns |
+| `WARNING` | Unexpected conditions that do not prevent the operation — recoverable state, deprecation notices |
+| `INFO` | Normal operational events — library initialization, token discovery, slot assignment |
+| `DEBUG` | Detailed trace output for every PKCS#11 function call and internal state transition |
+
+Each level includes all levels above it. Setting `log.level = DEBUG` produces the most output; `ERROR` produces the least.
+
+## Log format
+
+Every log entry is prefixed with the source file name and line number where the event occurred:
+
+```
+softhsm2[12345]: SoftHSM.cpp:412 C_Initialize success
+softhsm2[12345]: OSToken.cpp:88 Transaction in database is already active.
+```
+
+This format is defined at build time and can be changed by rebuilding the library (see `log.h`). The source location makes it straightforward to correlate a log entry with the exact code path that produced it.
+
+## Monitoring recommendations
+
+### Alert on ERROR-level messages
+
+ERROR messages indicate that SoftHSM returned a failure to the calling application. Configure your syslog aggregator or SIEM to alert on any message logged at the `LOG_ERR` syslog priority from the `softhsm2` process.
+
+### Monitor for failed login attempts
+
+Incorrect PIN attempts result in `CKR_PIN_INCORRECT` being returned to the caller. SoftHSM logs these at the WARNING or ERROR level. A pattern of repeated failures may indicate a brute-force attempt or a misconfigured application:
+
+```
+CKR_PIN_INCORRECT
+```
+
+Filter your syslog for this string and set up alerts for repeated occurrences within a short window.
+
+### Monitor token directory disk usage
+
+Token objects accumulate on disk in `directories.tokendir`. For long-running deployments that generate many ephemeral keys, disk usage may grow over time. Monitor the token directory with standard disk usage tooling:
+
+```bash
+du -sh /var/lib/softhsm/tokens/
+```
+
+Set a disk usage alert at an appropriate threshold for your environment.
+
+### Watch for SQLite transaction conflicts
+
+<Note>
+This issue was fixed in SoftHSM 2.7.0. If you are running an earlier version with the `db` object store backend, monitor for this message.
+</Note>
+
+When using the SQLite3 database object store backend (`objectstore.backend = db`), concurrent access from multiple processes could previously produce the following log message:
+
+```
+Transaction in database is already active.
+```
+
+If you see this message on a version before 2.7.0, it indicates a race condition in SQLite access. The fix is to upgrade to 2.7.0 or later. On older versions, reduce concurrent access to the same token.
+
+## Log level guidance by environment
+
+| Environment | Recommended level | Rationale |
+|---|---|---|
+| Production | `ERROR` or `WARNING` | Minimise log volume; alert on failures |
+| Staging / QA | `INFO` | Capture operational events for troubleshooting |
+| Development | `DEBUG` | Full trace of every PKCS#11 call |
+
+<Warning>
+Setting `log.level = DEBUG` in production generates a high volume of log data for every PKCS#11 operation and may expose sensitive metadata such as key identifiers and attribute values. Use it only temporarily for diagnostics.
+</Warning>

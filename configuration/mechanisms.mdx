@@ -1,0 +1,249 @@
+---
+title: "Mechanism configuration"
+description: "Control which PKCS#11 mechanisms are available per slot"
+---
+
+SoftHSM v2 lets you restrict or expand the set of PKCS#11 mechanisms that are advertised by `C_GetMechanismList` and accepted by `C_GetMechanismInfo`. This is controlled by the `slots.mechanisms` option in `softhsm2.conf`.
+
+## Configuration option
+
+```ini
+# Enable all mechanisms (default)
+slots.mechanisms = ALL
+
+# Enable only specific mechanisms
+slots.mechanisms = CKM_RSA_PKCS,CKM_RSA_PKCS_KEY_PAIR_GEN,CKM_SHA256_RSA_PKCS
+
+# Disable specific mechanisms, keep all others
+slots.mechanisms = -CKM_DES_KEY_GEN,CKM_DES_ECB,CKM_DES_CBC
+```
+
+<ParamField path="slots.mechanisms" type="string">
+  A comma-separated list of PKCS#11 mechanism names. Controls which mechanisms are reported by `C_GetMechanismList` and permitted for use.
+
+  **Syntax:**
+
+  | Value | Effect |
+  |---|---|
+  | `ALL` | All supported mechanisms are enabled (default) |
+  | `CKM_FOO,CKM_BAR,...` | Only the listed mechanisms are enabled (allowlist) |
+  | `-CKM_FOO,CKM_BAR,...` | All mechanisms **except** the listed ones are enabled (denylist) |
+
+  **Default:** `ALL`
+
+  Unknown mechanism names are silently ignored. This option applies to all slots.
+</ParamField>
+
+<Note>
+`slots.mechanisms` takes precedence over the `CKA_ALLOWED_MECHANISMS` attribute set on individual key objects.
+</Note>
+
+---
+
+## Allowlist vs. denylist
+
+**Allowlist** — specify exactly which mechanisms are available:
+
+```ini
+# Only RSA operations
+slots.mechanisms = CKM_RSA_PKCS_KEY_PAIR_GEN,CKM_RSA_PKCS,CKM_RSA_X_509,CKM_RSA_PKCS_OAEP,CKM_SHA256_RSA_PKCS
+```
+
+**Denylist** — disable specific mechanisms and keep all others. The value begins with a minus sign (`-`):
+
+```ini
+# Disable legacy DES, keep everything else
+slots.mechanisms = -CKM_DES_KEY_GEN,CKM_DES2_KEY_GEN,CKM_DES3_KEY_GEN,CKM_DES_ECB,CKM_DES_CBC
+```
+
+<Tip>
+When hardening a deployment, an explicit allowlist is safer than a denylist because newly added mechanisms in future versions are excluded automatically.
+</Tip>
+
+---
+
+## Supported mechanisms
+
+The following mechanism names are recognised by SoftHSM v2. Names not in this list are silently ignored.
+
+### Digests
+
+| Mechanism name | Description |
+|---|---|
+| `CKM_MD5` | MD5 digest |
+| `CKM_SHA_1` | SHA-1 digest |
+| `CKM_SHA224` | SHA-224 digest |
+| `CKM_SHA256` | SHA-256 digest |
+| `CKM_SHA384` | SHA-384 digest |
+| `CKM_SHA512` | SHA-512 digest |
+
+### HMAC
+
+| Mechanism name | Description |
+|---|---|
+| `CKM_MD5_HMAC` | HMAC with MD5 |
+| `CKM_SHA_1_HMAC` | HMAC with SHA-1 |
+| `CKM_SHA224_HMAC` | HMAC with SHA-224 |
+| `CKM_SHA256_HMAC` | HMAC with SHA-256 |
+| `CKM_SHA384_HMAC` | HMAC with SHA-384 |
+| `CKM_SHA512_HMAC` | HMAC with SHA-512 |
+
+### RSA
+
+| Mechanism name | Description |
+|---|---|
+| `CKM_RSA_PKCS_KEY_PAIR_GEN` | RSA key pair generation |
+| `CKM_RSA_PKCS` | RSA PKCS#1 v1.5 sign/encrypt |
+| `CKM_RSA_X_509` | Raw RSA (no padding) |
+| `CKM_MD5_RSA_PKCS` | RSA PKCS#1 v1.5 with MD5 |
+| `CKM_SHA1_RSA_PKCS` | RSA PKCS#1 v1.5 with SHA-1 |
+| `CKM_SHA224_RSA_PKCS` | RSA PKCS#1 v1.5 with SHA-224 |
+| `CKM_SHA256_RSA_PKCS` | RSA PKCS#1 v1.5 with SHA-256 |
+| `CKM_SHA384_RSA_PKCS` | RSA PKCS#1 v1.5 with SHA-384 |
+| `CKM_SHA512_RSA_PKCS` | RSA PKCS#1 v1.5 with SHA-512 |
+| `CKM_RSA_PKCS_OAEP` | RSA OAEP encryption |
+| `CKM_RSA_AES_KEY_WRAP` | RSA-AES key wrap |
+| `CKM_RSA_PKCS_PSS` | RSA PSS (raw, no hash) |
+| `CKM_SHA1_RSA_PKCS_PSS` | RSA PSS with SHA-1 |
+| `CKM_SHA224_RSA_PKCS_PSS` | RSA PSS with SHA-224 |
+| `CKM_SHA256_RSA_PKCS_PSS` | RSA PSS with SHA-256 |
+| `CKM_SHA384_RSA_PKCS_PSS` | RSA PSS with SHA-384 |
+| `CKM_SHA512_RSA_PKCS_PSS` | RSA PSS with SHA-512 |
+
+### Generic secret
+
+| Mechanism name | Description |
+|---|---|
+| `CKM_GENERIC_SECRET_KEY_GEN` | Generic secret key generation |
+
+### DES
+
+| Mechanism name | Description |
+|---|---|
+| `CKM_DES_KEY_GEN` | DES key generation |
+| `CKM_DES2_KEY_GEN` | DES2 (2-key Triple-DES) key generation |
+| `CKM_DES3_KEY_GEN` | DES3 (3-key Triple-DES) key generation |
+| `CKM_DES_ECB` | DES ECB |
+| `CKM_DES_CBC` | DES CBC |
+| `CKM_DES_CBC_PAD` | DES CBC with PKCS padding |
+| `CKM_DES_ECB_ENCRYPT_DATA` | DES ECB encrypt data (key derivation) |
+| `CKM_DES_CBC_ENCRYPT_DATA` | DES CBC encrypt data (key derivation) |
+| `CKM_DES3_ECB` | Triple-DES ECB |
+| `CKM_DES3_CBC` | Triple-DES CBC |
+| `CKM_DES3_CBC_PAD` | Triple-DES CBC with PKCS padding |
+| `CKM_DES3_ECB_ENCRYPT_DATA` | Triple-DES ECB encrypt data (key derivation) |
+| `CKM_DES3_CBC_ENCRYPT_DATA` | Triple-DES CBC encrypt data (key derivation) |
+| `CKM_DES3_CMAC` | Triple-DES CMAC |
+
+<Warning>
+DES and Triple-DES are considered legacy algorithms. Consider disabling all `CKM_DES*` mechanisms unless they are required for compatibility with existing tokens or applications.
+</Warning>
+
+### AES
+
+| Mechanism name | Description |
+|---|---|
+| `CKM_AES_KEY_GEN` | AES key generation |
+| `CKM_AES_ECB` | AES ECB |
+| `CKM_AES_CBC` | AES CBC |
+| `CKM_AES_CBC_PAD` | AES CBC with PKCS padding |
+| `CKM_AES_CTR` | AES CTR |
+| `CKM_AES_GCM` | AES GCM |
+| `CKM_AES_KEY_WRAP` | AES key wrap (RFC 3394) |
+| `CKM_AES_KEY_WRAP_PAD` | AES key wrap with padding (RFC 5649) |
+| `CKM_AES_ECB_ENCRYPT_DATA` | AES ECB encrypt data (key derivation) |
+| `CKM_AES_CBC_ENCRYPT_DATA` | AES CBC encrypt data (key derivation) |
+| `CKM_AES_CMAC` | AES CMAC |
+
+### DSA
+
+| Mechanism name | Description |
+|---|---|
+| `CKM_DSA_PARAMETER_GEN` | DSA domain parameter generation |
+| `CKM_DSA_KEY_PAIR_GEN` | DSA key pair generation |
+| `CKM_DSA` | DSA (raw, no hash) |
+| `CKM_DSA_SHA1` | DSA with SHA-1 |
+| `CKM_DSA_SHA224` | DSA with SHA-224 |
+| `CKM_DSA_SHA256` | DSA with SHA-256 |
+| `CKM_DSA_SHA384` | DSA with SHA-384 |
+| `CKM_DSA_SHA512` | DSA with SHA-512 |
+
+### Diffie-Hellman
+
+| Mechanism name | Description |
+|---|---|
+| `CKM_DH_PKCS_KEY_PAIR_GEN` | DH key pair generation |
+| `CKM_DH_PKCS_PARAMETER_GEN` | DH domain parameter generation |
+| `CKM_DH_PKCS_DERIVE` | DH key derivation |
+
+### EC / ECDSA / ECDH
+
+| Mechanism name | Description |
+|---|---|
+| `CKM_EC_KEY_PAIR_GEN` | EC key pair generation |
+| `CKM_ECDSA` | ECDSA (raw, no hash) |
+| `CKM_ECDSA_SHA1` | ECDSA with SHA-1 |
+| `CKM_ECDSA_SHA224` | ECDSA with SHA-224 |
+| `CKM_ECDSA_SHA256` | ECDSA with SHA-256 |
+| `CKM_ECDSA_SHA384` | ECDSA with SHA-384 |
+| `CKM_ECDSA_SHA512` | ECDSA with SHA-512 |
+| `CKM_ECDH1_DERIVE` | ECDH key derivation |
+
+### EdDSA
+
+| Mechanism name | Description |
+|---|---|
+| `CKM_EC_EDWARDS_KEY_PAIR_GEN` | Edwards curve key pair generation (Ed25519/Ed448) |
+| `CKM_EDDSA` | EdDSA signature |
+
+### GOST R 34
+
+| Mechanism name | Description |
+|---|---|
+| `CKM_GOSTR3411` | GOST R 34.11 digest |
+| `CKM_GOSTR3411_HMAC` | GOST R 34.11 HMAC |
+| `CKM_GOSTR3410_KEY_PAIR_GEN` | GOST R 34.10 key pair generation |
+| `CKM_GOSTR3410` | GOST R 34.10 signature |
+| `CKM_GOSTR3410_WITH_GOSTR3411` | GOST R 34.10 signature with GOST digest |
+
+### ML-DSA (CRYSTALS-Dilithium)
+
+| Mechanism name | Description |
+|---|---|
+| `CKM_ML_DSA_KEY_PAIR_GEN` | ML-DSA key pair generation |
+| `CKM_ML_DSA` | ML-DSA signature |
+
+### Key derivation utilities
+
+| Mechanism name | Description |
+|---|---|
+| `CKM_CONCATENATE_DATA_AND_BASE` | Concatenate data with base key |
+| `CKM_CONCATENATE_BASE_AND_DATA` | Concatenate base key with data |
+| `CKM_CONCATENATE_BASE_AND_KEY` | Concatenate two keys |
+
+---
+
+## Examples
+
+### Allowlist: RSA and AES only
+
+```ini
+slots.mechanisms = CKM_RSA_PKCS_KEY_PAIR_GEN,CKM_RSA_PKCS,CKM_RSA_PKCS_OAEP,\
+  CKM_SHA256_RSA_PKCS,CKM_SHA384_RSA_PKCS,CKM_SHA512_RSA_PKCS,\
+  CKM_SHA256_RSA_PKCS_PSS,CKM_SHA384_RSA_PKCS_PSS,CKM_SHA512_RSA_PKCS_PSS,\
+  CKM_AES_KEY_GEN,CKM_AES_CBC,CKM_AES_CBC_PAD,CKM_AES_GCM,CKM_AES_KEY_WRAP
+```
+
+### Denylist: disable all legacy DES mechanisms
+
+```ini
+slots.mechanisms = -CKM_DES_KEY_GEN,CKM_DES2_KEY_GEN,CKM_DES3_KEY_GEN,\
+  CKM_DES_ECB,CKM_DES_CBC,CKM_DES_CBC_PAD,\
+  CKM_DES_ECB_ENCRYPT_DATA,CKM_DES_CBC_ENCRYPT_DATA,\
+  CKM_DES3_ECB,CKM_DES3_CBC,CKM_DES3_CBC_PAD,\
+  CKM_DES3_ECB_ENCRYPT_DATA,CKM_DES3_CBC_ENCRYPT_DATA,CKM_DES3_CMAC
+```
+
+<Note>
+Line continuation with `\` is not supported by the SoftHSM config parser. The examples above use it for readability only — in a real configuration file, write all mechanism names on a single line.
+</Note>

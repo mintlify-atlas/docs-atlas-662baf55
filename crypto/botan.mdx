@@ -1,0 +1,105 @@
+---
+title: "Botan backend"
+description: "Using Botan as the cryptographic backend for SoftHSM v2"
+---
+
+Botan is an alternative cryptographic backend for SoftHSM v2. It is implemented by `BotanCryptoFactory`, which provides Botan-backed instances of every algorithm class that `CryptoFactory` defines.
+
+## Requirements
+
+- Botan **2.0.0** or later
+- Botan **2.6.0** or later is strongly recommended for better public key operation performance
+
+## Selecting the backend
+
+<Tabs>
+  <Tab title="Autotools">
+    ```bash
+    ./configure --with-crypto-backend=botan
+    ```
+  </Tab>
+  <Tab title="CMake">
+    ```bash
+    cmake -DWITH_CRYPTO_BACKEND=botan .
+    ```
+  </Tab>
+</Tabs>
+
+## Pointing to a custom Botan installation
+
+If Botan is installed in a non-standard prefix, use `--with-botan`:
+
+```bash
+./configure --with-crypto-backend=botan --with-botan=/opt/botan-2
+```
+
+The build system appends `/include` and `/lib` to the path you supply.
+
+## Supported algorithms
+
+### Asymmetric
+
+| Algorithm | Notes |
+|---|---|
+| RSA | All standard key sizes |
+| DSA | |
+| ECDSA | Requires `--enable-ecc` (auto-detected) |
+| ECDH | Requires `--enable-ecc` (auto-detected) |
+| EdDSA | Requires `--enable-eddsa` (auto-detected) |
+| DH | |
+| GOST | Requires `--enable-gost` (auto-detected) |
+
+### Symmetric
+
+| Algorithm | Notes |
+|---|---|
+| AES | CBC, ECB, CTR, OFB, CFB |
+| 3DES | CBC, ECB, OFB, CFB |
+
+### Hash
+
+| Algorithm |
+|---|
+| MD5 |
+| SHA-1 |
+| SHA-224 |
+| SHA-256 |
+| SHA-384 |
+| SHA-512 |
+| GOST R 34.11-94 (if GOST enabled) |
+
+### MAC
+
+| Algorithm |
+|---|
+| HMAC-MD5 |
+| HMAC-SHA-1 |
+| HMAC-SHA-224 |
+| HMAC-SHA-256 |
+| HMAC-SHA-384 |
+| HMAC-SHA-512 |
+
+<Note>
+CMAC is not available with the Botan backend. If you require CMAC, use the OpenSSL backend.
+</Note>
+
+## Limitations
+
+<Warning>
+ML-DSA (post-quantum) is only available with the OpenSSL backend. If you need ML-DSA support, you must use `--with-crypto-backend=openssl` with OpenSSL 3.x.
+</Warning>
+
+Botan does not support OpenSSL engines or FIPS 140-2 mode.
+
+## Performance note
+
+Botan 2.6.0 introduced significant improvements to public key operations. When using the Botan backend, use version 2.6.0 or later to avoid noticeable performance regressions on RSA, DSA, ECDSA, and ECDH operations.
+
+```bash
+# Verify installed Botan version
+pkg-config --modversion botan-2
+```
+
+## Thread safety
+
+`BotanCryptoFactory` maintains a per-thread RNG instance (keyed by `pthread_t` on POSIX systems, or by `DWORD` thread ID on Windows). This avoids contention on a shared RNG state during concurrent PKCS#11 calls.

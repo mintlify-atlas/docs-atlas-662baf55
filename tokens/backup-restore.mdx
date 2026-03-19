@@ -1,0 +1,130 @@
+---
+title: "Backup and restore"
+description: "Back up and restore SoftHSM token data"
+---
+
+All token data — keys, certificates, PINs, and token metadata — is stored on disk in the directory configured by `directories.tokendir` in `softhsm2.conf`. Backups are ordinary file-system operations.
+
+## Where tokens are stored
+
+Each token occupies its own subdirectory inside `tokendir`. The subdirectory name is a UUID generated at initialization time, not the token label:
+
+```text
+<tokendir>/
+  ├── 550e8400-e29b-41d4-a716-446655440000/   # token 1
+  │     ├── token.object                       # label, serial, PINs, flags
+  │     ├── 7f3c1a2b-....object               # cryptographic object
+  │     └── 9d4e8f12-....object               # cryptographic object
+  └── a3f1b2c4-e5d6-7890-abcd-ef1234567890/   # token 2
+        ├── token.object
+        └── ...
+```
+
+<Note>
+Token directories are identified by UUID, not by label. Two tokens can share the same label, but their UUIDs will differ. When restoring, always transfer the full UUID directory.
+</Note>
+
+If SoftHSM was built with the SQLite3 object store backend (`--with-objectstore-backend-db`), each token's data is stored in a single SQLite3 database file inside the UUID directory instead of individual `.object` files.
+
+## Backing up tokens
+
+### File-based backend (default)
+
+Copy the entire `tokendir` or the specific UUID subdirectories you want to preserve:
+
+```bash
+# Back up all tokens
+cp -a /var/lib/softhsm/tokens/ /mnt/backup/softhsm-tokens-$(date +%Y%m%d)/
+
+# Back up a single token by UUID
+cp -a /var/lib/softhsm/tokens/550e8400-e29b-41d4-a716-446655440000/ \
+       /mnt/backup/token-550e8400/
+```
+
+<Tip>
+Use `softhsm2-util --show-slots` to identify the UUID of the directory corresponding to a token label before selecting which directories to back up.
+</Tip>
+
+### SQLite3 backend
+
+For the SQLite3 backend, back up the database file inside the token's UUID directory. Use the SQLite3 online backup API or simply copy the file while SoftHSM is not actively writing to it:
+
+```bash
+# Safe offline copy
+cp -a /var/lib/softhsm/tokens/550e8400-e29b-41d4-a716-446655440000/ \
+       /mnt/backup/token-550e8400/
+
+# Online backup using sqlite3 CLI
+sqlite3 /var/lib/softhsm/tokens/550e8400-.../token.db \
+  ".backup /mnt/backup/token-550e8400.db"
+```
+
+<Warning>
+Do not copy a SQLite3 database file while SoftHSM is actively running and may be writing to it. Use the SQLite3 backup API or shut down any process holding the library open first.
+</Warning>
+
+## Restoring tokens
+
+<Steps>
+  <Step title="Stop any process using SoftHSM">
+    Ensure no application has the SoftHSM PKCS#11 library loaded before you modify the token directory.
+  </Step>
+  <Step title="Copy the token directory back">
+    Restore the UUID subdirectory into `tokendir`:
+
+    ```bash
+    cp -a /mnt/backup/token-550e8400/ \
+           /var/lib/softhsm/tokens/550e8400-e29b-41d4-a716-446655440000/
+    ```
+  </Step>
+  <Step title="Set correct permissions">
+    Token files must be readable and writable by the user running SoftHSM. Fix ownership and permissions if needed:
+
+    ```bash
+    chown -R softhsm:softhsm /var/lib/softhsm/tokens/
+    ```
+
+    The `objectstore.umask` setting in `softhsm2.conf` controls the permission mask applied to newly created token files. Ensure the restored files are consistent with this setting.
+  </Step>
+  <Step title="Verify the token is accessible">
+    Confirm the restored token appears correctly:
+
+    ```bash
+    softhsm2-util --show-slots
+    ```
+
+    The token's label and serial number should appear in the output.
+  </Step>
+</Steps>
+
+## File permissions and objectstore.umask
+
+The `objectstore.umask` setting in `softhsm2.conf` determines the permission mask applied when SoftHSM creates token and object files. The default is `0077`, which makes files accessible only to the owning user.
+
+```text
+# softhsm2.conf
+objectstore.umask = 0077
+```
+
+When restoring from a backup, verify that the restored files have permissions consistent with this mask. If the files are too permissive, SoftHSM may refuse to use them or other users on the system may be able to read key material.
+
+```bash
+# Check permissions on token files
+ls -la /var/lib/softhsm/tokens/550e8400-e29b-41d4-a716-446655440000/
+```
+
+<Warning>
+Token files contain sensitive cryptographic material including private keys. Ensure backup storage is protected with appropriate access controls and encryption at rest.
+</Warning>
+
+## Moving tokens to another machine
+
+Because tokens are identified by UUID directory name and the serial number embedded in `token.object`, you can move a token to another machine by:
+
+1. Copying the UUID directory to the same `tokendir` path on the target machine.
+2. Ensuring the `softhsm2.conf` on the target machine points to the same `tokendir`.
+3. Verifying the `objectstore.backend` setting matches the backend used when the token was created.
+
+<Note>
+The slot ID assigned to the token on the target machine may differ from the source machine, since slot IDs are derived from the serial number but also depend on what other tokens are present. Always look up tokens by label or serial number rather than slot ID.
+</Note>

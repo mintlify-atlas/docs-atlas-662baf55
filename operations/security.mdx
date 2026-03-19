@@ -1,0 +1,108 @@
+---
+title: "Security considerations"
+description: "Operational security best practices for SoftHSM v2 deployments"
+---
+
+<Warning>
+SoftHSM is a **software** HSM. It does not provide hardware-level tamper resistance. Private key material lives on disk and is subject to the security of the operating system and file system. Do not use SoftHSM as a substitute for a certified hardware HSM in environments where tamper resistance is a requirement.
+</Warning>
+
+## Private key material on disk
+
+SoftHSM stores all token objects — including private keys — in the `directories.tokendir` location defined in `softhsm2.conf`. Anyone with read access to that directory can potentially extract key material.
+
+Apply strict permissions to the token directory:
+
+```bash
+# Create the token directory owned by the service account
+sudo mkdir -p /var/lib/softhsm/tokens/
+sudo chown softhsm:softhsm /var/lib/softhsm/tokens/
+sudo chmod 700 /var/lib/softhsm/tokens/
+```
+
+Use `700` (owner read/write/execute only) for maximum restriction, or `750` if the service group requires access.
+
+## objectstore.umask
+
+Added in SoftHSM 2.7.0, the `objectstore.umask` setting controls the file mode creation mask applied when SoftHSM creates token files and directories. The value is in octal and is applied **in addition to** the process umask — it cannot grant permissions that the process umask has already removed.
+
+```ini
+# softhsm2.conf — restrict new token files to owner only
+objectstore.umask = 0077
+```
+
+The default sample configuration uses `0077`, which means group and other bits are cleared for all newly created object store files.
+
+<Note>
+`objectstore.umask` does not retroactively change permissions on existing files. After changing this setting, verify permissions on existing token directories manually.
+</Note>
+
+## Non-paged memory
+
+By default, SoftHSM allocates sensitive data (such as private key material held in memory during an operation) in non-paged (locked) memory. This prevents the operating system from writing those pages to a swap file or swap partition, reducing the risk of key material appearing in a memory dump or swap image.
+
+This behaviour is controlled at build time:
+
+| Method | Description |
+|---|---|
+| `./configure --disable-non-paged-memory` | Disable non-paged memory (Autotools build) |
+| `-DDISABLE_NON_PAGED_MEMORY=ON` | Disable non-paged memory (CMake build) |
+
+Disabling non-paged memory is only appropriate when the OS cannot grant the required privileges (e.g., in some container environments). Leave it enabled in production deployments.
+
+<Warning>
+If non-paged memory is disabled, in-memory key material may be written to swap. Ensure swap is encrypted or disabled on systems handling sensitive keys.
+</Warning>
+
+## SO PIN vs user PIN
+
+SoftHSM enforces the PKCS#11 two-role model:
+
+- **Security Officer (SO) PIN** — Used to initialize or re-initialize a token. A token reset with the SO PIN destroys all existing objects on that token. Restrict the SO PIN to administrators.
+- **User PIN** — Used by applications to perform cryptographic operations. Applications should only be given the user PIN.
+
+Choose distinct, high-entropy values for both PINs. Avoid storing either PIN in plaintext configuration files or environment variables where possible.
+
+## Securing the configuration file
+
+The default configuration file location is `/etc/softhsm2.conf`. You can override it with the `SOFTHSM2_CONF` environment variable:
+
+```bash
+export SOFTHSM2_CONF=/etc/myapp/softhsm2.conf
+```
+
+Best practices for the config file:
+
+- Set ownership to the service user and mode `640` or `600`.
+- Do not place the config file in a world-readable location such as `/tmp`.
+- If using a per-user config (`~/.config/softhsm2/softhsm2.conf`), ensure the home directory has appropriate permissions.
+
+```bash
+# Example: lock down a custom config file
+sudo chown softhsm:softhsm /etc/myapp/softhsm2.conf
+sudo chmod 640 /etc/myapp/softhsm2.conf
+```
+
+<Info>
+A user-specific config at `~/.config/softhsm2/softhsm2.conf` takes precedence over the system-wide config if it exists.
+</Info>
+
+## p11-kit integration
+
+SoftHSM can be registered as a PKCS#11 module via p11-kit. There are two registration scopes:
+
+- **System-wide** (`/usr/share/p11-kit/modules/` or `/etc/pkcs11/modules/`) — all users on the system can load the module. Only appropriate for shared servers where all users should have access.
+- **Per-user** (`~/.config/pkcs11/modules/`) — limits module availability to a single user account.
+
+Prefer per-user registration in multi-user environments to avoid exposing the token directory to other users.
+
+## Network considerations
+
+SoftHSM has no network interface. It operates exclusively as a local shared library loaded in-process. There is no daemon, no listening socket, and no remote API. Network-level isolation is therefore not applicable, but you should still:
+
+- Restrict which processes can read the token directory via file permissions.
+- Audit which applications are granted the user PIN.
+
+## FIPS compliance
+
+For guidance on running SoftHSM in a FIPS 140-2 configuration, see the [FIPS page](/crypto/fips).

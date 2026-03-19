@@ -1,0 +1,205 @@
+---
+title: "softhsm2.conf reference"
+description: "Complete reference for all SoftHSM v2 configuration options"
+---
+
+SoftHSM v2 reads its configuration from a plain-text file at startup. Each option is a `name = value` pair on its own line. Lines beginning with `#` are comments and are ignored, as are blank lines.
+
+## Configuration file location
+
+The library searches for a configuration file in the following order:
+
+1. The path set in the `SOFTHSM2_CONF` environment variable.
+2. `~/.config/softhsm2/softhsm2.conf` (user-specific; overrides the system-wide file when present).
+3. The system-wide default, typically `/etc/softhsm2.conf`.
+
+```bash
+# Use a custom configuration file
+export SOFTHSM2_CONF=/opt/myapp/softhsm2.conf
+```
+
+<Note>
+On Windows the user-specific path is `%HOMEDRIVE%%HOMEPATH%\softhsm2.conf`.
+</Note>
+
+## Minimal example
+
+```ini
+# SoftHSM v2 configuration file
+
+directories.tokendir = /var/lib/softhsm/tokens/
+objectstore.backend = file
+objectstore.umask = 0077
+
+log.level = ERROR
+
+slots.removable = false
+slots.mechanisms = ALL
+library.reset_on_fork = false
+```
+
+---
+
+## directories
+
+<ParamField path="directories.tokendir" type="string" required>
+  The directory where SoftHSM stores token data. The directory must exist and be writable before the library is loaded.
+
+  **Default:** `/var/lib/softhsm/tokens/`
+
+  ```ini
+  directories.tokendir = /var/lib/softhsm/tokens/
+  ```
+
+  Create the directory before first use:
+
+  ```bash
+  sudo mkdir -p /var/lib/softhsm/tokens
+  sudo chmod 700 /var/lib/softhsm/tokens
+  ```
+</ParamField>
+
+---
+
+## objectstore
+
+<ParamField path="objectstore.backend" type="string">
+  The storage backend used to persist token objects. Two backends are supported:
+
+  - `file` — one file per object in the token directory (default).
+  - `db` — a single SQLite3 database file per token. Requires the library to be compiled with `--with-objectstore-backend-db`.
+
+  **Default:** `file`
+
+  ```ini
+  objectstore.backend = file
+  ```
+
+  See [Object store backends](/configuration/object-store) for a detailed comparison.
+</ParamField>
+
+<ParamField path="objectstore.umask" type="octal integer">
+  An additional file mode creation mask applied when SoftHSM creates files or directories inside the token directory. The value is in octal notation.
+
+  This mask is applied **on top of** the process umask and cannot grant permissions that the process umask has already denied.
+
+  **Default:** `0077` (owner read/write only; group and other access denied)
+
+  **Added in:** 2.7.0
+
+  ```ini
+  objectstore.umask = 0077
+  ```
+
+  <Warning>
+  Setting a permissive umask such as `0000` may expose token objects to other users on the system. Keep the default (`0077`) unless you have a specific reason to relax permissions.
+  </Warning>
+</ParamField>
+
+---
+
+## log
+
+<ParamField path="log.level" type="string">
+  The minimum severity level of messages that SoftHSM will emit. Messages below this level are silently discarded.
+
+  Accepted values (from most to least verbose):
+
+  | Value | Syslog equivalent | Description |
+  |---|---|---|
+  | `DEBUG` | `LOG_DEBUG` | All internal tracing messages |
+  | `INFO` | `LOG_INFO` | Notable operational events |
+  | `WARNING` | `LOG_WARNING` | Non-fatal conditions |
+  | `ERROR` | `LOG_ERR` | Errors only (default) |
+
+  **Default:** `ERROR`
+
+  ```ini
+  log.level = ERROR
+  ```
+
+  See [Logging](/configuration/logging) for more details on log output and format.
+</ParamField>
+
+<ParamField path="log.file" type="string">
+  Path to a file where log output is written. When set, log messages are written to this file instead of syslog. The file is opened in append mode.
+
+  If the file cannot be opened, SoftHSM falls back to syslog and emits a warning.
+
+  **Default:** _(empty — log to syslog)_
+
+  ```ini
+  log.file = /var/log/softhsm2.log
+  ```
+
+  When logging to a file, each line includes a timestamp, process ID, severity, and the source location:
+
+  ```
+  2026-01-20 14:32:01.042 [12345] ERROR: SoftHSM.cpp(512): Could not open token directory
+  ```
+</ParamField>
+
+---
+
+## slots
+
+<ParamField path="slots.removable" type="boolean">
+  When `true`, SoftHSM sets the `CKF_REMOVABLE_DEVICE` flag in the `CK_SLOT_INFO` structure returned by `C_GetSlotInfo`. Some applications use this flag to determine how to present the token to the user.
+
+  **Default:** `false`
+
+  ```ini
+  slots.removable = false
+  ```
+</ParamField>
+
+<ParamField path="slots.mechanisms" type="string">
+  A comma-separated list of PKCS#11 mechanism names that controls which mechanisms are reported by `C_GetMechanismList` and accepted by `C_GetMechanismInfo`.
+
+  **Syntax options:**
+
+  | Value | Behaviour |
+  |---|---|
+  | `ALL` | All supported mechanisms are enabled (default) |
+  | `CKM_FOO,CKM_BAR` | Only the listed mechanisms are enabled |
+  | `-CKM_FOO,CKM_BAR` | All mechanisms **except** the listed ones are enabled |
+
+  **Default:** `ALL`
+
+  ```ini
+  # Enable only RSA PKCS and raw RSA
+  slots.mechanisms = CKM_RSA_PKCS,CKM_RSA_X_509
+
+  # Disable only legacy DES mechanisms, keep everything else
+  slots.mechanisms = -CKM_DES_KEY_GEN,CKM_DES_ECB,CKM_DES_CBC
+  ```
+
+  <Note>
+  This option takes precedence over the `CKA_ALLOWED_MECHANISMS` attribute on key objects. Unknown mechanism names are silently ignored.
+  </Note>
+
+  See [Mechanism configuration](/configuration/mechanisms) for the full list of supported mechanism names.
+</ParamField>
+
+---
+
+## library
+
+<ParamField path="library.reset_on_fork" type="boolean">
+  Controls what happens to open PKCS#11 sessions when a process calls `fork(2)`.
+
+  - `false` — the child inherits all open sessions from the parent (default POSIX behaviour).
+  - `true` — the library resets its internal state in the child process, closing all sessions. This is safer for multi-process applications that fork after loading the library.
+
+  **Default:** `false`
+
+  **Added in:** 2.6.0
+
+  ```ini
+  library.reset_on_fork = true
+  ```
+
+  <Warning>
+  Setting `library.reset_on_fork = true` means that any sessions opened before `fork` will not be usable in the child process. Applications must re-initialize the library after forking.
+  </Warning>
+</ParamField>

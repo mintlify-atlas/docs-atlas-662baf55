@@ -1,0 +1,302 @@
+---
+title: "Architecture"
+description: "How SoftHSM v2 is structured internally — components, data flow, and design decisions"
+---
+
+SoftHSM v2 is a software implementation of a PKCS\#11 cryptographic device. It is built and installed as a shared library (`libsofthsm2.so`) that any PKCS\#11-aware application can load. There is no daemon process — the library runs entirely in the calling application's address space.
+
+## Component overview
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                     libsofthsm2.so                               │
+│                                                                  │
+│  ┌──────────────┐    dispatches to    ┌────────────────────────┐ │
+│  │   main.cpp   │ ─────────────────▶  │  SoftHSM  (singleton)  │ │
+│  │  C_* exports │                     └──────────┬─────────────┘ │
+│  └──────────────┘                               │                │
+│                              ┌──────────────────┼──────────────┐ │
+│                              ▼                  ▼              ▼ │
+│                    ┌─────────────────┐  ┌──────────────┐  ┌───────────────┐ │
+│                    │  SlotManager    │  │SessionManager│  │ HandleManager │ │
+│                    │  (Slot / Token) │  │  (Session)   │  │               │ │
+│                    └────────┬────────┘  └──────────────┘  └───────────────┘ │
+│                             │                                    │
+│                    ┌────────▼────────┐       ┌──────────────────▼──────┐   │
+│                    │   ObjectStore   │       │   SessionObjectStore     │   │
+│                    │ (file or SQLite)│       │  (in-memory session objs)│   │
+│                    └─────────────────┘       └──────────────────────────┘   │
+│                                                                  │
+│               ┌──────────────────────────────────────────┐      │
+│               │  CryptoFactory  (abstract singleton)      │      │
+│               │   OSSLCryptoFactory │ BotanCryptoFactory  │      │
+│               └──────────────────────────────────────────┘      │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+<Note>
+SoftHSM does not expose a network socket or run a background process. It is loaded directly by the calling application via `dlopen` (or the platform equivalent), just like any other shared library.
+</Note>
+
+## Core components
+
+<CardGroup cols={2}>
+  <Card title="SoftHSM" icon="cpu">
+    The central singleton class (`src/lib/SoftHSM.h`). It owns all subsystem pointers and implements every PKCS\#11 function as a method. Accessed through `SoftHSM::i()`.
+  </Card>
+  <Card title="SlotManager" icon="layers">
+    Manages the set of slots exposed to the application (`src/lib/slot_mgr/SlotManager.h`). Each slot holds a `Token`. SoftHSM always keeps one extra slot with an uninitialized token so new tokens can be created.
+  </Card>
+  <Card title="SessionManager" icon="panel-left">
+    Tracks all open sessions (`src/lib/session_mgr/SessionManager.h`). Each `Session` object records its state, the active cryptographic operation, and a reference to the slot it was opened against.
+  </Card>
+  <Card title="ObjectStore" icon="database">
+    Manages persistent token storage (`src/lib/object_store/ObjectStore.h`). It is rooted at a configurable directory and enumerates tokens from that path. Supports two storage backends.
+  </Card>
+  <Card title="SessionObjectStore" icon="memory-stick">
+    Holds session objects — objects that exist only for the lifetime of the session that created them. Backed entirely in memory.
+  </Card>
+  <Card title="HandleManager" icon="hash">
+    Translates opaque `CK_OBJECT_HANDLE` values returned to callers into internal `OSObject` pointers. Isolates callers from internal memory addresses.
+  </Card>
+  <Card title="CryptoFactory" icon="flask-conical">
+    Abstract singleton (`src/lib/crypto/CryptoFactory.h`) that vends `SymmetricAlgorithm`, `AsymmetricAlgorithm`, `HashAlgorithm`, `MacAlgorithm`, and `RNG` instances. Concrete subclasses implement these against OpenSSL or Botan.
+  </Card>
+  <Card title="MutexFactory" icon="lock">
+    Provides portable mutex primitives. When a caller passes `CKF_OS_LOCKING_OK` to `C_Initialize`, the library uses OS-level locking; otherwise it uses the locking callbacks supplied by the caller.
+  </Card>
+</CardGroup>
+
+## How a PKCS\#11 call flows through the library
+
+`main.cpp` is the sole entry point file. It defines a static `CK_FUNCTION_LIST` structure that maps every standard PKCS\#11 function name to a thin wrapper function. Each wrapper catches unhandled C++ exceptions at the library boundary, then calls through to the `SoftHSM` singleton.
+
+```cpp
+// src/lib/main.cpp — example wrapper
+PKCS_API CK_RV C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData,
+                      CK_ULONG ulDataLen, CK_BYTE_PTR pSignature,
+                      CK_ULONG_PTR pulSignatureLen)
+{
+    try
+    {
+        return SoftHSM::i()->C_Sign(hSession, pData, ulDataLen,
+                                    pSignature, pulSignatureLen);
+    }
+    catch (...)
+    {
+        FatalException();
+    }
+    return CKR_FUNCTION_FAILED;
+}
+```
+
+`C_GetFunctionList` returns a pointer to this static `functionList` structure directly, without routing through `SoftHSM`, since no library state is required.
+
+<Steps>
+  <Step title="Application calls C_GetFunctionList">
+    The application resolves `C_GetFunctionList` from the shared library and calls it. `main.cpp` returns a pointer to the static `CK_FUNCTION_LIST` (`functionList`), which contains pointers to every exported wrapper function.
+  </Step>
+  <Step title="Application calls C_Initialize">
+    `main.cpp` calls `SoftHSM::i()->C_Initialize(pInitArgs)`. The singleton is created on first access. `C_Initialize` sets up the `ObjectStore`, `SlotManager`, `SessionManager`, `HandleManager`, and `SessionObjectStore`, and calls into `CryptoFactory` to initialize the crypto backend.
+  </Step>
+  <Step title="Application opens a session">
+    `C_OpenSession` is routed to `SoftHSM::C_OpenSession`, which asks `SlotManager` for the requested slot, then instructs `SessionManager` to create a new `Session` object. The new `CK_SESSION_HANDLE` is registered in `HandleManager`.
+  </Step>
+  <Step title="Application performs a cryptographic operation">
+    Two-phase operations (e.g. `C_SignInit` / `C_Sign`) store operation context on the `Session` object. The `SoftHSM` method resolves the key handle via `HandleManager`, loads key material from `ObjectStore` or `SessionObjectStore`, requests an algorithm instance from `CryptoFactory`, and drives the operation to completion.
+  </Step>
+  <Step title="Application calls C_Finalize">
+    `SoftHSM::C_Finalize` tears down the session manager, slot manager, and object store, then calls `CryptoFactory::reset()` and `SoftHSM::reset()` to destroy the singleton.
+  </Step>
+</Steps>
+
+## The SoftHSM singleton
+
+`SoftHSM` follows the classic singleton pattern. The private constructor and a static `std::unique_ptr<SoftHSM>` instance prevent external instantiation.
+
+```cpp
+// src/lib/SoftHSM.h (abridged)
+class SoftHSM
+{
+public:
+    static SoftHSM* i();   // returns or creates the singleton
+    static void reset();   // destroys the singleton
+
+    // PKCS #11 interface — one method per function
+    CK_RV C_Initialize(CK_VOID_PTR pInitArgs);
+    CK_RV C_Sign(CK_SESSION_HANDLE hSession, ...);
+    // ... 60+ more methods
+
+private:
+    SoftHSM();
+
+    static std::unique_ptr<SoftHSM> instance;
+
+    bool isInitialised;
+    SessionObjectStore* sessionObjectStore;
+    ObjectStore*        objectStore;
+    SlotManager*        slotManager;
+    SessionManager*     sessionManager;
+    HandleManager*      handleManager;
+};
+```
+
+The `forkID` member and `detectFork()` method handle the case where an application forks after calling `C_Initialize`. PKCS\#11 requires that the child re-initialize the library.
+
+## Slot and token model
+
+`SlotManager` holds a `SlotMap` (`std::map<CK_SLOT_ID, Slot*>`). Each `Slot` wraps an `ObjectStoreToken` that represents one persistent token directory on disk.
+
+```cpp
+// src/lib/slot_mgr/SlotManager.h (abridged)
+class SlotManager
+{
+public:
+    SlotManager(ObjectStore* objectStore);
+
+    SlotMap  getSlots();
+    CK_RV    getSlotList(ObjectStore*, CK_BBOOL, CK_SLOT_ID_PTR, CK_ULONG_PTR);
+    Slot*    getSlot(CK_SLOT_ID slotID);
+
+private:
+    SlotMap slots;
+};
+```
+
+SoftHSM always appends one extra slot containing an uninitialized token. When `C_InitToken` is called against that slot, the new token is assigned a serial-number-based slot ID and another empty slot is appended. This means slot IDs are not stable across re-initialization — applications should locate tokens by label or serial number, not by slot ID.
+
+<Tip>
+Use `C_GetTokenInfo` to match tokens by label or serial number rather than relying on a fixed slot ID. Initialized tokens are reassigned to a new slot ID derived from their serial number.
+</Tip>
+
+## Object store backends
+
+The `ObjectStore` class supports two storage backends selected at compile time.
+
+<CardGroup cols={2}>
+  <Card title="File-based backend (default)" icon="folder">
+    Token objects are stored as individual files inside a per-token subdirectory. The root directory is configured via `softhsm2.conf`. Backup is a plain file-system copy. Implemented by `OSToken` and `ObjectFile` in `src/lib/object_store/`.
+  </Card>
+  <Card title="SQLite3 backend" icon="table">
+    Enabled with `--with-objectstore-backend-db` at configure time. Each token is a SQLite3 database file. Implemented by `DBToken` and `DBObject` in `src/lib/object_store/`. Also required for the SoftHSM v1 migration tool (`--with-migrate`).
+  </Card>
+</CardGroup>
+
+```cpp
+// src/lib/object_store/ObjectStore.h (abridged)
+class ObjectStore
+{
+public:
+    ObjectStore(std::string inStorePath, int umask);
+
+    size_t            getTokenCount();
+    ObjectStoreToken* getToken(size_t whichToken);
+    ObjectStoreToken* newToken(const ByteString& label);
+    bool              destroyToken(ObjectStoreToken* token);
+    bool              isValid();
+
+private:
+    std::vector<ObjectStoreToken*> tokens;
+    std::string storePath;
+    Mutex*      storeMutex;
+};
+```
+
+`SessionObjectStore` is a separate, always-in-memory store for session objects. The `SoftHSM` class holds both an `ObjectStore` (persistent) and a `SessionObjectStore` (ephemeral) simultaneously.
+
+<Info>
+The token directory is set by the `directories.tokendir` key in `softhsm2.conf`. The default path is `/var/lib/softhsm/tokens/`. Override the config file path with the `SOFTHSM2_CONF` environment variable.
+</Info>
+
+## Crypto backend abstraction
+
+`CryptoFactory` is an abstract singleton. At build time exactly one concrete subclass is compiled in:
+
+| Configure flag | Concrete class | Source |
+|---|---|---|
+| `--with-crypto-backend=openssl` | `OSSLCryptoFactory` | `src/lib/crypto/OSSLCryptoFactory.cpp` |
+| `--with-crypto-backend=botan` | `BotanCryptoFactory` | `src/lib/crypto/BotanCryptoFactory.cpp` |
+
+```cpp
+// src/lib/crypto/CryptoFactory.h (abridged)
+class CryptoFactory
+{
+public:
+    static CryptoFactory* i();   // returns the concrete singleton
+    static void reset();
+
+    virtual SymmetricAlgorithm*  getSymmetricAlgorithm(SymAlgo::Type)  = 0;
+    virtual AsymmetricAlgorithm* getAsymmetricAlgorithm(AsymAlgo::Type) = 0;
+    virtual HashAlgorithm*       getHashAlgorithm(HashAlgo::Type)       = 0;
+    virtual MacAlgorithm*        getMacAlgorithm(MacAlgo::Type)         = 0;
+    virtual RNG*                 getRNG(RNGImpl::Type name = RNGImpl::Default) = 0;
+
+    virtual void recycleSymmetricAlgorithm(SymmetricAlgorithm*);
+    virtual void recycleAsymmetricAlgorithm(AsymmetricAlgorithm*);
+    virtual void recycleHashAlgorithm(HashAlgorithm*);
+    virtual void recycleMacAlgorithm(MacAlgorithm*);
+};
+```
+
+`SoftHSM.cpp` selects the concrete header at the preprocessor level:
+
+```cpp
+// src/lib/SoftHSM.cpp
+#if defined(WITH_OPENSSL)
+#include "OSSLCryptoFactory.h"
+#else
+#include "BotanCryptoFactory.h"
+#endif
+```
+
+Algorithm instances are requested for each operation and returned via `recycle*` methods when the operation completes. This allows backend implementations to pool or cache algorithm objects if needed.
+
+## Algorithm dispatch inside SoftHSM
+
+For operations that can apply to either symmetric or asymmetric keys, `SoftHSM` uses internal helper methods to select the right code path before delegating to `CryptoFactory`:
+
+```cpp
+// src/lib/SoftHSM.h — internal dispatch helpers
+CK_RV SymEncryptInit(CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE);
+CK_RV AsymEncryptInit(CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE);
+
+CK_RV MacSignInit(CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE);
+CK_RV AsymSignInit(CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE);
+```
+
+Key generation follows the same pattern: `C_GenerateKeyPair` dispatches to typed helpers (`generateRSA`, `generateEC`, `generateED`, `generateDH`, `generateDSA`, `generateGOST`, `generateMLDSA`) based on the mechanism type.
+
+## Optional algorithm support
+
+Several algorithms are conditionally compiled:
+
+```cpp
+// src/lib/SoftHSM.h
+#ifdef WITH_ECC
+    CK_RV deriveECDH(...);
+#endif
+#ifdef WITH_EDDSA
+    CK_RV deriveEDDSA(...);
+#endif
+#ifdef WITH_ML_DSA
+    CK_RV generateMLDSA(...);
+#endif
+```
+
+The corresponding configure flags are `--enable-ecc`, `--enable-eddsa`, `--enable-mldsa`, and `--enable-gost`.
+
+## Shared library deployment
+
+After `make install`, the library is placed where p11-kit or the calling application can find it. The install path for the p11-kit module can be overridden with `--with-p11-kit=PATH`.
+
+```bash
+# Load SoftHSM via its absolute path (no p11-kit)
+pkcs11-tool --module /usr/local/lib/softhsm/libsofthsm2.so --list-slots
+
+# Or set in the application's PKCS #11 configuration
+module: /usr/local/lib/softhsm/libsofthsm2.so
+```
+
+<Note>
+Log output goes to syslog (or the Windows Event Log). Each message is prefixed with the source file name and line number. The log level is controlled by the `log.level` key in `softhsm2.conf`.
+</Note>

@@ -1,0 +1,289 @@
+---
+title: "Encryption and decryption"
+description: "PKCS#11 encryption and decryption operations in SoftHSM v2"
+---
+
+SoftHSM v2 implements the full PKCS#11 encrypt/decrypt function family. Both symmetric (AES, 3DES) and asymmetric (RSA) encryption are supported through a unified interface.
+
+## Functions
+
+### C_EncryptInit
+
+Initializes an encryption operation in the session. You must call this before `C_Encrypt`, `C_EncryptUpdate`, or `C_EncryptFinal`.
+
+```c
+CK_RV C_EncryptInit(
+    CK_SESSION_HANDLE hSession,
+    CK_MECHANISM_PTR  pMechanism,
+    CK_OBJECT_HANDLE  hKey
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of the open session.
+</ParamField>
+
+<ParamField path="pMechanism" type="CK_MECHANISM_PTR" required>
+  Pointer to a `CK_MECHANISM` structure identifying the encryption algorithm and its parameters (for example, an IV for CBC mode or `CK_GCM_PARAMS` for GCM).
+</ParamField>
+
+<ParamField path="hKey" type="CK_OBJECT_HANDLE" required>
+  Handle of the key object to use. The key must have `CKA_ENCRYPT` set to `CK_TRUE`.
+</ParamField>
+
+Internally, SoftHSM routes the call to `SymEncryptInit` for symmetric mechanisms or `AsymEncryptInit` for RSA.
+
+---
+
+### C_Encrypt
+
+Encrypts data in a single-part operation. Call `C_EncryptInit` first.
+
+```c
+CK_RV C_Encrypt(
+    CK_SESSION_HANDLE hSession,
+    CK_BYTE_PTR       pData,
+    CK_ULONG          ulDataLen,
+    CK_BYTE_PTR       pEncryptedData,
+    CK_ULONG_PTR      pulEncryptedDataLen
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of the open session.
+</ParamField>
+
+<ParamField path="pData" type="CK_BYTE_PTR" required>
+  Pointer to the plaintext data to encrypt.
+</ParamField>
+
+<ParamField path="ulDataLen" type="CK_ULONG" required>
+  Length of `pData` in bytes.
+</ParamField>
+
+<ParamField path="pEncryptedData" type="CK_BYTE_PTR">
+  Pointer to the buffer that receives the ciphertext. Pass `NULL_PTR` on the first call to retrieve the required buffer size.
+</ParamField>
+
+<ParamField path="pulEncryptedDataLen" type="CK_ULONG_PTR" required>
+  On input: size of `pEncryptedData`. On output: number of bytes written (or required if `pEncryptedData` is `NULL_PTR`).
+</ParamField>
+
+<Tip>
+Use the two-pass pattern to avoid guessing buffer sizes. Pass `NULL_PTR` for `pEncryptedData` on the first call — the function returns `CKR_OK` and sets `*pulEncryptedDataLen` to the required size. Allocate the buffer, then call again with the real pointer.
+</Tip>
+
+For block ciphers without padding, the input length must be a multiple of the block size or `CKR_DATA_LEN_RANGE` is returned. With padding (`CKM_AES_CBC_PAD`, `CKM_DES3_CBC_PAD`) the output may be up to one block larger than the input. For GCM mode, the output is `ulDataLen + tagBytes`.
+
+---
+
+### C_EncryptUpdate
+
+Continues a multi-part encryption operation.
+
+```c
+CK_RV C_EncryptUpdate(
+    CK_SESSION_HANDLE hSession,
+    CK_BYTE_PTR       pData,
+    CK_ULONG          ulDataLen,
+    CK_BYTE_PTR       pEncryptedData,
+    CK_ULONG_PTR      pulEncryptedDataLen
+);
+```
+
+Each call feeds additional plaintext. The function may buffer data internally before producing ciphertext output. Finalize with `C_EncryptFinal`.
+
+<Warning>
+RSA encryption (`CKM_RSA_PKCS`, `CKM_RSA_PKCS_OAEP`) supports single-part operations only. Calling `C_EncryptUpdate` with an RSA key returns `CKR_FUNCTION_NOT_SUPPORTED`.
+</Warning>
+
+---
+
+### C_EncryptFinal
+
+Finishes a multi-part encryption operation and returns any remaining ciphertext.
+
+```c
+CK_RV C_EncryptFinal(
+    CK_SESSION_HANDLE hSession,
+    CK_BYTE_PTR       pEncryptedData,
+    CK_ULONG_PTR      pulEncryptedDataLen
+);
+```
+
+After `C_EncryptFinal` returns (success or failure) the session's encrypt operation is cleared. A new `C_EncryptInit` is required before the next encrypt.
+
+---
+
+### C_DecryptInit / C_Decrypt / C_DecryptUpdate / C_DecryptFinal
+
+The decrypt functions mirror the encrypt functions exactly:
+
+| Encrypt function | Decrypt counterpart |
+|---|---|
+| `C_EncryptInit(hSession, pMechanism, hKey)` | `C_DecryptInit(hSession, pMechanism, hKey)` |
+| `C_Encrypt(hSession, pData, ulDataLen, pEncryptedData, pulEncryptedDataLen)` | `C_Decrypt(hSession, pEncryptedData, ulEncryptedDataLen, pData, pulDataLen)` |
+| `C_EncryptUpdate(...)` | `C_DecryptUpdate(...)` |
+| `C_EncryptFinal(...)` | `C_DecryptFinal(...)` |
+
+The key must have `CKA_DECRYPT` set to `CK_TRUE`. The same two-pass pattern applies to `C_Decrypt` — pass `NULL_PTR` for `pData` to get the required output buffer length.
+
+For GCM decryption, authentication tag verification happens inside the cipher. If the tag does not match, the operation returns `CKR_ENCRYPTED_DATA_INVALID`.
+
+---
+
+## Supported mechanisms
+
+### Symmetric mechanisms
+
+| Mechanism | Key type | Parameters | Notes |
+|---|---|---|---|
+| `CKM_AES_ECB` | `CKK_AES` | None | No padding; input must be a block multiple |
+| `CKM_AES_CBC` | `CKK_AES` | 16-byte IV (`CK_BYTE[16]`) | No padding |
+| `CKM_AES_CBC_PAD` | `CKK_AES` | 16-byte IV | PKCS#7 padding |
+| `CKM_AES_CTR` | `CKK_AES` | `CK_AES_CTR_PARAMS` | Stream cipher, no padding |
+| `CKM_AES_GCM` | `CKK_AES` | `CK_GCM_PARAMS` | Authenticated encryption |
+| `CKM_DES3_ECB` | `CKK_DES2` or `CKK_DES3` | None | |
+| `CKM_DES3_CBC` | `CKK_DES2` or `CKK_DES3` | 8-byte IV | |
+| `CKM_DES3_CBC_PAD` | `CKK_DES2` or `CKK_DES3` | 8-byte IV | PKCS#7 padding |
+| `CKM_DES_ECB` | `CKK_DES` | None | Not available in FIPS mode |
+| `CKM_DES_CBC` | `CKK_DES` | 8-byte IV | Not available in FIPS mode |
+| `CKM_DES_CBC_PAD` | `CKK_DES` | 8-byte IV | Not available in FIPS mode |
+
+### Asymmetric mechanisms
+
+| Mechanism | Key type | Parameters |
+|---|---|---|
+| `CKM_RSA_PKCS` | `CKK_RSA` | None |
+| `CKM_RSA_PKCS_OAEP` | `CKK_RSA` | `CK_RSA_PKCS_OAEP_PARAMS` |
+| `CKM_RSA_X_509` | `CKK_RSA` | None |
+
+---
+
+## Mechanism parameters
+
+### CK_RSA_PKCS_OAEP_PARAMS
+
+Required for `CKM_RSA_PKCS_OAEP`.
+
+```c
+typedef struct CK_RSA_PKCS_OAEP_PARAMS {
+    CK_MECHANISM_TYPE hashAlg;       /* hash used in MGF and for label: e.g. CKM_SHA256 */
+    CK_RSA_PKCS_MGF_TYPE mgf;       /* mask generation function: e.g. CKG_MGF1_SHA256 */
+    CK_RSA_PKCS_OAEP_SOURCE_TYPE source; /* CKZ_DATA_SPECIFIED */
+    CK_VOID_PTR pSourceData;        /* optional label */
+    CK_ULONG ulSourceDataLen;       /* label length in bytes */
+} CK_RSA_PKCS_OAEP_PARAMS;
+```
+
+### CK_GCM_PARAMS
+
+Required for `CKM_AES_GCM`.
+
+```c
+typedef struct CK_GCM_PARAMS {
+    CK_BYTE_PTR pIv;          /* initialization vector */
+    CK_ULONG    ulIvLen;      /* IV length in bytes (typically 12) */
+    CK_ULONG    ulIvBits;     /* IV length in bits */
+    CK_BYTE_PTR pAAD;         /* additional authenticated data */
+    CK_ULONG    ulAADLen;     /* AAD length in bytes */
+    CK_ULONG    ulTagBits;    /* authentication tag length in bits (must be a multiple of 8, max 128) */
+} CK_GCM_PARAMS;
+```
+
+### CK_AES_CTR_PARAMS
+
+Required for `CKM_AES_CTR`.
+
+```c
+typedef struct CK_AES_CTR_PARAMS {
+    CK_ULONG ulCounterBits;   /* number of bits in the counter field (1..128) */
+    CK_BYTE  cb[16];          /* initial counter block */
+} CK_AES_CTR_PARAMS;
+```
+
+---
+
+## Error codes
+
+| Return value | Meaning |
+|---|---|
+| `CKR_OK` | Success |
+| `CKR_ARGUMENTS_BAD` | A required argument is `NULL_PTR` or the mechanism parameters are malformed |
+| `CKR_KEY_FUNCTION_NOT_PERMITTED` | The key does not have `CKA_ENCRYPT` / `CKA_DECRYPT` |
+| `CKR_KEY_TYPE_INCONSISTENT` | The key type does not match the mechanism |
+| `CKR_DATA_LEN_RANGE` | Input length is not a valid multiple for unpadded block cipher |
+| `CKR_BUFFER_TOO_SMALL` | Output buffer too small; required size is written to `*pulEncryptedDataLen` |
+| `CKR_ENCRYPTED_DATA_INVALID` | GCM authentication tag verification failed |
+| `CKR_ENCRYPTED_DATA_LEN_RANGE` | Ciphertext length is invalid for the mechanism |
+| `CKR_OPERATION_ACTIVE` | Another operation is already in progress on this session |
+| `CKR_OPERATION_NOT_INITIALIZED` | `C_EncryptInit` has not been called |
+| `CKR_MECHANISM_INVALID` | The mechanism is not supported |
+| `CKR_MECHANISM_PARAM_INVALID` | Mechanism parameters are out of range |
+
+<Note>
+Prior to SoftHSM v2.7.0, some decryption failures that should have returned `CKR_ENCRYPTED_DATA_INVALID` or `CKR_ENCRYPTED_DATA_LEN_RANGE` instead returned `CKR_GENERAL_ERROR`. This was corrected in v2.7.0.
+</Note>
+
+---
+
+## Example: AES-CBC encrypt and decrypt
+
+```c
+#include <string.h>
+#include <stdlib.h>
+#include <pkcs11.h>
+
+/*
+ * Encrypt then decrypt a buffer with AES-CBC (no padding).
+ * Assumes the library is initialised, a session is open, and
+ * hAesKey is a 128/192/256-bit AES key with CKA_ENCRYPT and CKA_DECRYPT.
+ */
+void aes_cbc_roundtrip(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hAesKey)
+{
+    CK_BYTE iv[16] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                       0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f };
+
+    CK_MECHANISM mechanism = {
+        CKM_AES_CBC,
+        iv,
+        sizeof(iv)
+    };
+
+    /* Plaintext must be a multiple of 16 bytes for CKM_AES_CBC */
+    CK_BYTE plaintext[32] = "Hello, SoftHSM v2 encryption!  ";
+    CK_ULONG plaintextLen = sizeof(plaintext);
+
+    /* --- Encryption --- */
+    CK_RV rv = C_EncryptInit(hSession, &mechanism, hAesKey);
+    if (rv != CKR_OK) { /* handle error */ return; }
+
+    /* First pass: get required output buffer size */
+    CK_ULONG ciphertextLen = 0;
+    rv = C_Encrypt(hSession, plaintext, plaintextLen, NULL_PTR, &ciphertextLen);
+    if (rv != CKR_OK) { return; }
+
+    CK_BYTE *ciphertext = malloc(ciphertextLen);
+
+    /* Second pass: encrypt */
+    rv = C_Encrypt(hSession, plaintext, plaintextLen, ciphertext, &ciphertextLen);
+    if (rv != CKR_OK) { free(ciphertext); return; }
+
+    /* --- Decryption --- */
+    /* Re-init: the IV must be the same for CBC */
+    rv = C_DecryptInit(hSession, &mechanism, hAesKey);
+    if (rv != CKR_OK) { free(ciphertext); return; }
+
+    CK_ULONG recoveredLen = 0;
+    rv = C_Decrypt(hSession, ciphertext, ciphertextLen, NULL_PTR, &recoveredLen);
+    if (rv != CKR_OK) { free(ciphertext); return; }
+
+    CK_BYTE *recovered = malloc(recoveredLen);
+    rv = C_Decrypt(hSession, ciphertext, ciphertextLen, recovered, &recoveredLen);
+    if (rv != CKR_OK) { free(ciphertext); free(recovered); return; }
+
+    /* recovered now equals plaintext */
+    free(ciphertext);
+    free(recovered);
+}
+```

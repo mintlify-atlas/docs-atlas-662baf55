@@ -1,0 +1,121 @@
+---
+title: "Introduction"
+description: "SoftHSM v2 — a software implementation of a Hardware Security Module with a full PKCS#11 interface"
+---
+
+## What is SoftHSM?
+
+SoftHSM is a software implementation of a generic cryptographic device with a PKCS#11 interface. It was originally developed as part of the [OpenDNSSEC](https://www.opendnssec.org/) project and is now a standalone project.
+
+OpenDNSSEC handles and stores its cryptographic keys via the PKCS#11 interface. This interface specifies how to communicate with cryptographic devices such as HSMs (Hardware Security Modules) and smart cards. The purpose of these devices is to generate cryptographic keys and sign information without revealing private-key material to the outside world.
+
+SoftHSM removes the requirement for physical hardware, making it possible to develop against the PKCS#11 interface and test cryptographic workflows without the cost and complexity of a real HSM.
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation/autotools">
+    Build and install SoftHSM v2 on your system using Autotools or CMake
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/softhsm2-conf">
+    Configure the softhsm2.conf file, object store, logging, and mechanisms
+  </Card>
+  <Card title="Token Management" icon="key" href="/tokens/overview">
+    Initialize tokens, manage slots, and back up your token store
+  </Card>
+  <Card title="PKCS#11 Reference" icon="code" href="/pkcs11/overview">
+    Full reference for all PKCS#11 functions implemented by SoftHSM
+  </Card>
+  <Card title="CLI Tools" icon="terminal" href="/cli/softhsm2-util">
+    Use softhsm2-util, softhsm2-keyconv, and other command-line tools
+  </Card>
+  <Card title="Crypto Backends" icon="shield" href="/crypto/overview">
+    Choose between OpenSSL and Botan cryptographic backends
+  </Card>
+</CardGroup>
+
+## Key features
+
+- **Full PKCS#11 v3.2 implementation** — Drop-in software replacement for hardware HSMs. Link your application to `libsofthsm2.so` just as you would a real HSM.
+- **Multiple algorithm support** — RSA, DSA, ECDSA, ECDH, EdDSA (Ed25519/Ed448), DH, GOST, and ML-DSA (post-quantum lattice-based signatures).
+- **Pluggable crypto backends** — Choose between OpenSSL (default) or Botan for the underlying cryptographic operations.
+- **Flexible object stores** — Store tokens as files on disk or in a SQLite3 database backend.
+- **p11-kit integration** — Register `libsofthsm2.so` as a system-wide PKCS#11 module via p11-kit.
+- **FIPS 140-2 capable** — When linked against a FIPS-capable OpenSSL build.
+- **Cross-platform** — Linux, macOS, and Windows.
+
+## How it works
+
+SoftHSM presents itself as a standard PKCS#11 shared library (`libsofthsm2.so` on Linux/macOS, `softhsm2.dll` on Windows). Any application that supports PKCS#11 can load this library and use it to:
+
+1. Manage cryptographic tokens and slots
+2. Generate and store symmetric and asymmetric keys
+3. Perform signing, verification, encryption, and decryption
+4. Derive keys and generate random data
+
+Token data (keys and objects) is persisted in a configurable location on disk, either as individual object files or in a SQLite3 database.
+
+## Intended use cases
+
+<Info>
+SoftHSM is designed for **development, testing, and environments where a physical HSM is not available**. It does not provide the tamper-resistance guarantees of real hardware HSMs.
+</Info>
+
+- **Development and testing** — Develop PKCS#11-based applications without physical hardware.
+- **OpenDNSSEC deployments** — The original and primary use case: DNSSEC key storage and signing.
+- **CI/CD pipelines** — Run cryptographic operations in automated pipelines.
+- **Reference implementation** — Understand PKCS#11 behavior against a known-good implementation.
+
+## Quick start
+
+<Steps>
+  <Step title="Install dependencies">
+    Install a cryptographic library (OpenSSL ≥ 1.0.0 or Botan ≥ 2.0.0) and build tools.
+
+    ```bash
+    # Debian/Ubuntu
+    sudo apt-get install libssl-dev autoconf automake libtool pkg-config
+
+    # RHEL/CentOS/Fedora
+    sudo dnf install openssl-devel autoconf automake libtool libtool-ltdl-devel pkg-config
+    ```
+  </Step>
+  <Step title="Build and install">
+    ```bash
+    ./configure --with-crypto-backend=openssl
+    make
+    sudo make install
+    ```
+  </Step>
+  <Step title="Configure">
+    Create the default configuration file at `/etc/softhsm2.conf`:
+
+    ```
+    directories.tokendir = /var/lib/softhsm/tokens/
+    objectstore.backend = file
+    log.level = INFO
+    ```
+
+    Then create the token directory:
+
+    ```bash
+    sudo mkdir -p /var/lib/softhsm/tokens/
+    ```
+  </Step>
+  <Step title="Initialize a token">
+    ```bash
+    softhsm2-util --init-token --free --label "MyToken" \
+      --so-pin 1234567890 --pin 123456
+    ```
+  </Step>
+  <Step title="Link your application">
+    Point your PKCS#11 application at the SoftHSM library:
+
+    ```bash
+    # Default install path (Linux)
+    /usr/local/lib/softhsm/libsofthsm2.so
+    ```
+  </Step>
+</Steps>
+
+## Project history
+
+SoftHSM started as part of the OpenDNSSEC project. Version 2 was a complete rewrite introducing support for multiple cryptographic backends (OpenSSL and Botan), a new file-based object store, and broader algorithm support. The project is now maintained independently and supports the full PKCS#11 v3.2 specification.

@@ -1,0 +1,235 @@
+---
+title: "Migration guide"
+description: "Migrate from SoftHSM v1 to v2, or between object store backends"
+---
+
+## Migrating from SoftHSM v1 to v2
+
+SoftHSM v2 uses a completely different token storage format from v1. The `softhsm2-migrate` tool reads a v1 SQLite3 token database and imports the objects into a v2 token via the PKCS#11 interface.
+
+### Prerequisites
+
+- SoftHSM v2 must be built with migration support: `--with-migrate` (Autotools) or `-DWITH_MIGRATE=ON` (CMake).
+- SQLite3 ≥ 3.4.2 is required for the migration tool.
+- A SoftHSM v2 token must be initialized and ready to receive the imported objects.
+
+<Note>
+The migration tool can also target any other PKCS#11 library, not just SoftHSM v2, by using the `--module` option.
+</Note>
+
+### Building with migration support
+
+<Tabs>
+  <Tab title="Autotools">
+    ```bash
+    ./configure --with-migrate
+    make
+    sudo make install
+    ```
+  </Tab>
+  <Tab title="CMake">
+    ```bash
+    cmake -DWITH_MIGRATE=ON ..
+    make
+    sudo make install
+    ```
+  </Tab>
+</Tabs>
+
+### Migration steps
+
+<Steps>
+  <Step title="Locate the v1 token database">
+    Find the SQLite3 database file used by SoftHSM v1. Its path is set in the SoftHSM v1 configuration file, typically under a `token.db` path.
+
+    ```bash
+    # Example v1 config lookup
+    grep '^token.db' /etc/softhsm/softhsm.conf
+    ```
+  </Step>
+
+  <Step title="Initialize a v2 token">
+    Create the destination token in SoftHSM v2:
+
+    ```bash
+    softhsm2-util --init-token --free \
+      --label "migrated-token" \
+      --so-pin <SO_PIN> \
+      --pin <USER_PIN>
+    ```
+  </Step>
+
+  <Step title="Run softhsm2-migrate">
+    Migrate the v1 database into the v2 token. Identify the destination token by label:
+
+    ```bash
+    softhsm2-migrate \
+      --db /path/to/v1/token.db \
+      --token migrated-token \
+      --pin <USER_PIN>
+    ```
+
+    Or by slot number:
+
+    ```bash
+    softhsm2-migrate \
+      --db /path/to/v1/token.db \
+      --slot <SLOT_NUMBER> \
+      --pin <USER_PIN>
+    ```
+  </Step>
+
+  <Step title="Verify the migration">
+    List objects in the destination token to confirm all keys were imported:
+
+    ```bash
+    softhsm2-util --show-slots
+    pkcs11-tool --module /usr/local/lib/softhsm/libsofthsm2.so \
+      --list-objects --login --pin <USER_PIN>
+    ```
+  </Step>
+</Steps>
+
+### softhsm2-migrate options
+
+| Option | Description |
+|---|---|
+| `--db <path>` | Path to the SoftHSM v1 SQLite3 database to migrate |
+| `--token <label>` | Use the v2 token with this label as the destination |
+| `--serial <number>` | Use the v2 token with this serial number as the destination |
+| `--slot <number>` | Use the v2 slot number as the destination |
+| `--pin <PIN>` | User PIN for the destination token |
+| `--no-public-key` | Do not migrate public key objects (migrate private keys only) |
+| `--module <path>` | Use a different PKCS#11 library instead of SoftHSM v2 |
+| `--help`, `-h` | Show help |
+| `--version`, `-v` | Show version |
+
+<Warning>
+Migration does not remove the v1 database. Keep the v1 database as a backup until you have verified that all objects are present and functional in the v2 token.
+</Warning>
+
+---
+
+## Moving between object store backends
+
+SoftHSM v2 supports two object store backends:
+
+- **`file`** — Each token object is stored as a separate file on disk (default).
+- **`db`** — All token objects are stored in a SQLite3 database file per token.
+
+There is no direct in-place conversion between backends. Use an export and re-import approach via `softhsm2-util` and a PKCS#11 key export/import tool, or re-generate keys in the new backend if your use case allows it.
+
+<Note>
+The `db` backend requires SQLite3 and must be enabled at build time with `--with-objectstore-backend-db` (Autotools) or `-DWITH_OBJECTSTORE_BACKEND_DB=ON` (CMake).
+</Note>
+
+### Steps to switch backends
+
+<Steps>
+  <Step title="Back up the existing token directory">
+    ```bash
+    cp -a /var/lib/softhsm/tokens/ /var/lib/softhsm/tokens.bak/
+    ```
+  </Step>
+
+  <Step title="Export key material">
+    Export the keys you need to transfer. For asymmetric keys, use `softhsm2-util --export-pubkey` for public keys and a PKCS#11 wrapping scheme for private keys if your application supports it. For certificates and other objects, use the relevant PKCS#11 export functions.
+
+    ```bash
+    # Example: export a public key by object ID
+    softhsm2-util --export-pubkey --id <OBJECT_ID> \
+      --slot <SLOT> --pin <USER_PIN> \
+      --out pubkey.der
+    ```
+  </Step>
+
+  <Step title="Update softhsm2.conf">
+    Change the `objectstore.backend` setting:
+
+    ```ini
+    objectstore.backend = db
+    ```
+
+    Then create a fresh token directory (or clear the existing one):
+
+    ```bash
+    rm -rf /var/lib/softhsm/tokens/*
+    ```
+  </Step>
+
+  <Step title="Initialize a new token">
+    ```bash
+    softhsm2-util --init-token --free \
+      --label "my-token" \
+      --so-pin <SO_PIN> \
+      --pin <USER_PIN>
+    ```
+  </Step>
+
+  <Step title="Import key material into the new backend">
+    Import the exported keys into the new token:
+
+    ```bash
+    softhsm2-util --import pubkey.der \
+      --type public \
+      --slot <SLOT> --pin <USER_PIN> \
+      --label mykey --id <OBJECT_ID>
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Moving tokens between systems
+
+SoftHSM tokens are self-contained directory trees under `directories.tokendir`. Moving a token to another system is a file copy operation.
+
+### Steps
+
+<Steps>
+  <Step title="Stop any applications using the token">
+    Ensure no process has the SoftHSM library loaded and the token in use before copying.
+  </Step>
+
+  <Step title="Copy the token directory">
+    ```bash
+    # On the source system
+    tar -czf tokens-backup.tar.gz -C /var/lib/softhsm tokens/
+
+    # Transfer to the target system
+    scp tokens-backup.tar.gz user@target-host:/tmp/
+
+    # On the target system
+    tar -xzf /tmp/tokens-backup.tar.gz -C /var/lib/softhsm/
+    ```
+  </Step>
+
+  <Step title="Set permissions on the target system">
+    Restore ownership and permissions after the copy:
+
+    ```bash
+    chown -R softhsm:softhsm /var/lib/softhsm/tokens/
+    chmod 700 /var/lib/softhsm/tokens/
+    ```
+  </Step>
+
+  <Step title="Update the configuration on the target system">
+    Ensure the `directories.tokendir` in `softhsm2.conf` on the target system points to the same path, or update it to match the new location:
+
+    ```ini
+    directories.tokendir = /var/lib/softhsm/tokens/
+    ```
+  </Step>
+
+  <Step title="Verify the token is recognised">
+    ```bash
+    softhsm2-util --show-slots
+    ```
+
+    The token should appear with its original label and serial number.
+  </Step>
+</Steps>
+
+<Warning>
+Copying a token replicates the private key material exactly. The source token and the copied token are identical — both can be used independently. If you intend to decommission the source, delete the source token directory after verifying the copy is functional.
+</Warning>

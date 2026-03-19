@@ -1,0 +1,111 @@
+---
+title: "Token overview"
+description: "Understand PKCS#11 tokens, slots, and how SoftHSM manages them"
+---
+
+## What is a token?
+
+In PKCS#11 terminology, a **token** is a logical cryptographic device. It holds cryptographic keys and other objects (certificates, data), and exposes operations such as key generation, signing, and encryption through the PKCS#11 API. Tokens were originally modeled after physical hardware devices — smart cards or HSMs — but SoftHSM implements the same interface entirely in software.
+
+Each token has:
+
+- A **label** — a human-readable name up to 32 characters, set at initialization time.
+- A **serial number** — a unique identifier assigned at initialization, used internally to determine slot placement.
+- A **Security Officer (SO) PIN** and a **user PIN** — two separate credentials controlling different levels of access.
+
+## What is a slot?
+
+A **slot** is the container that holds a token. In the PKCS#11 model, applications enumerate slots and then interact with the token present in a given slot. Think of a slot as a card reader and a token as the smart card inserted into it.
+
+Applications identify tokens by enumerating the slot list and inspecting each token's label or serial number, rather than relying on a fixed slot number.
+
+## How SoftHSM assigns slots
+
+SoftHSM derives a slot ID from the last 8 hex digits of the token's serial number, masked to 31 bits. This means:
+
+- Slot IDs are **not sequential** and are not guaranteed to be stable across library reloads if tokens are added or removed.
+- After a token is initialized, it is **reassigned to a new slot** based on its serial number. The slot number used during initialization does not persist.
+- SoftHSM **always keeps one additional empty slot** available so that a new token can be initialized at any time.
+
+<Note>
+Do not hardcode slot numbers in your application. Always look up the token you need by label or serial number from the slot list.
+</Note>
+
+## Token states
+
+A token is either **uninitialized** or **initialized**.
+
+| State | Description |
+|---|---|
+| Uninitialized | The slot exists but the token has no label, no PINs, and holds no objects. This is the placeholder token SoftHSM keeps in its always-available free slot. |
+| Initialized | The token has a label, an SO PIN, and a user PIN. It can store cryptographic objects and be used by PKCS#11 applications. |
+
+Re-initializing an initialized token erases all objects stored on it.
+
+## Token persistence
+
+Each token is persisted on disk. The storage location is controlled by the `directories.tokendir` setting in `softhsm2.conf`.
+
+**File-based backend (default):** Each token is stored as a subdirectory inside `tokendir`. The subdirectory name is a UUID assigned at creation time. Inside the directory, each cryptographic object is stored as a separate file, and a special token object file holds the token's metadata (label, serial number, PINs).
+
+**SQLite3 backend** (when built with `--with-objectstore-backend-db`): Token data is stored in a SQLite3 database file instead of individual files.
+
+```text
+<tokendir>/
+  └── <uuid>/           # one subdirectory per token
+        ├── token.object  # token metadata (label, serial, PINs)
+        └── <uuid>.object # one file per cryptographic object
+```
+
+<Tip>
+The subdirectory UUID is the token's canonical identifier on disk, not its label. Labels can be the same across tokens; UUIDs cannot.
+</Tip>
+
+## Listing slots and token status
+
+Use `softhsm2-util --show-slots` to display all slots and their current token status:
+
+```bash
+softhsm2-util --show-slots
+```
+
+Example output:
+
+```text
+Available slots:
+Slot 0x2f8e4b1a
+    Slot info:
+        Description:      SoftHSM slot ID 0x2f8e4b1a
+        Manufacturer ID:  SoftHSM project
+        Hardware version: 2.6
+        Firmware version: 2.6
+        Token present:    yes
+    Token info:
+        Manufacturer ID:  SoftHSM project
+        Model:            SoftHSM v2
+        Hardware version: 2.6
+        Firmware version: 2.6
+        Serial number:    2f8e4b1aXXXXXXXX
+        Initialized:      yes
+        User PIN init.:   yes
+        Label:            My token 1
+Slot 0x1
+    Slot info:
+        Description:      SoftHSM slot ID 0x1
+        ...
+    Token info:
+        Initialized:      no
+```
+
+The last slot in the list is always the free (uninitialized) slot kept available by SoftHSM.
+
+## SO PIN vs user PIN
+
+SoftHSM enforces two distinct PIN roles defined by PKCS#11:
+
+| Role | PIN | Purpose |
+|---|---|---|
+| Security Officer | SO PIN | Administrative operations: re-initializing the token, setting the initial user PIN. |
+| Normal user | User PIN | Day-to-day cryptographic operations: generating keys, signing, encrypting. |
+
+Applications that use cryptographic keys log in with the user PIN. The SO PIN is kept by administrators and is required when a token needs to be re-initialized. Re-initialization with the SO PIN permanently erases all objects on the token.

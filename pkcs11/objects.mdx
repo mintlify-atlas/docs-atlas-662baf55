@@ -1,0 +1,432 @@
+---
+title: "Object management"
+description: "Creating, reading, modifying, and searching PKCS#11 objects in SoftHSM v2"
+---
+
+PKCS#11 objects are structured containers for cryptographic material and associated metadata. SoftHSM v2 stores token objects persistently on disk (in the file-based or SQLite3 object store) and session objects in memory for the lifetime of the session.
+
+## Object classes
+
+| Class | Constant | Description |
+|---|---|---|
+| Data | `CKO_DATA` | Arbitrary application data. |
+| Certificate | `CKO_CERTIFICATE` | X.509 or other certificate types. |
+| Public key | `CKO_PUBLIC_KEY` | Asymmetric public key (RSA, EC, DSA, …). |
+| Private key | `CKO_PRIVATE_KEY` | Asymmetric private key. Typically sensitive. |
+| Secret key | `CKO_SECRET_KEY` | Symmetric key (AES, 3DES, HMAC, …). |
+| Mechanism parameter | `CKO_DOMAIN_PARAMETERS` | Algorithm domain parameters (DSA/DH primes, EC curves). |
+
+## Common attributes
+
+Every object carries a set of attributes. The most frequently used ones are:
+
+| Attribute | Type | Description |
+|---|---|---|
+| `CKA_CLASS` | `CK_OBJECT_CLASS` | Object class (required on creation). |
+| `CKA_TOKEN` | `CK_BBOOL` | `CK_TRUE` = persistent token object; `CK_FALSE` = session object. |
+| `CKA_PRIVATE` | `CK_BBOOL` | `CK_TRUE` = requires login to access. |
+| `CKA_LABEL` | byte array | Human-readable label (UTF-8). |
+| `CKA_ID` | byte array | Application-assigned identifier, used to link public/private key pairs. |
+| `CKA_SENSITIVE` | `CK_BBOOL` | Key value cannot be extracted in plaintext. Once set to `CK_TRUE`, cannot be changed back. |
+| `CKA_EXTRACTABLE` | `CK_BBOOL` | Key can be wrapped out. Once set to `CK_FALSE`, cannot be changed back. |
+| `CKA_WRAP_WITH_TRUSTED` | `CK_BBOOL` | Key can only be wrapped by a key with `CKA_TRUSTED = CK_TRUE`. Once set to `CK_TRUE`, cannot be changed back. |
+| `CKA_MODIFIABLE` | `CK_BBOOL` | Object attributes can be changed after creation. |
+| `CKA_COPYABLE` | `CK_BBOOL` | Object can be duplicated with `C_CopyObject`. |
+
+<Warning>
+  `CKA_SENSITIVE`, `CKA_EXTRACTABLE`, and `CKA_WRAP_WITH_TRUSTED` are sticky attributes. `CKA_SENSITIVE` can only transition to `CK_TRUE` (never back to `CK_FALSE`), and `CKA_EXTRACTABLE` / `CKA_WRAP_WITH_TRUSTED` can only transition to `CK_FALSE` once set to `CK_TRUE` for the latter. After the transition, the attribute becomes read-only.
+</Warning>
+
+---
+
+## C_CreateObject
+
+Creates a new object from a caller-supplied attribute template.
+
+```c
+CK_RV C_CreateObject(
+    CK_SESSION_HANDLE   hSession,
+    CK_ATTRIBUTE_PTR    pTemplate,
+    CK_ULONG            ulCount,
+    CK_OBJECT_HANDLE_PTR phObject
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of an open session. Must be read/write if creating a token object (`CKA_TOKEN = CK_TRUE`).
+</ParamField>
+
+<ParamField path="pTemplate" type="CK_ATTRIBUTE_PTR" required>
+  Array of `CK_ATTRIBUTE` structures specifying the object's attributes. `CKA_CLASS` is mandatory. Key-type objects also require `CKA_KEY_TYPE`.
+</ParamField>
+
+<ParamField path="ulCount" type="CK_ULONG" required>
+  Number of attributes in `pTemplate`.
+</ParamField>
+
+<ParamField path="phObject" type="CK_OBJECT_HANDLE_PTR" required>
+  Receives the handle of the newly created object.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SESSION_HANDLE_INVALID`, `CKR_SESSION_READ_ONLY`, `CKR_TEMPLATE_INCOMPLETE` (required attribute missing), `CKR_TEMPLATE_INCONSISTENT` (conflicting attribute values), `CKR_ATTRIBUTE_READ_ONLY`, `CKR_USER_NOT_LOGGED_IN` (creating a private object without login), `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+---
+
+## C_CopyObject
+
+Creates a copy of an existing object, optionally overriding specific attributes.
+
+```c
+CK_RV C_CopyObject(
+    CK_SESSION_HANDLE    hSession,
+    CK_OBJECT_HANDLE     hObject,
+    CK_ATTRIBUTE_PTR     pTemplate,
+    CK_ULONG             ulCount,
+    CK_OBJECT_HANDLE_PTR phNewObject
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of an open session.
+</ParamField>
+
+<ParamField path="hObject" type="CK_OBJECT_HANDLE" required>
+  Handle of the source object to copy. The object must have `CKA_COPYABLE = CK_TRUE`.
+</ParamField>
+
+<ParamField path="pTemplate" type="CK_ATTRIBUTE_PTR">
+  Optional array of attributes to override in the copy. Only attributes flagged as modifiable (check 8 in the PKCS#11 spec) may be changed during a copy operation.
+</ParamField>
+
+<ParamField path="ulCount" type="CK_ULONG" required>
+  Number of attributes in `pTemplate`. Pass 0 if `pTemplate` is `NULL_PTR`.
+</ParamField>
+
+<ParamField path="phNewObject" type="CK_OBJECT_HANDLE_PTR" required>
+  Receives the handle of the new copy.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SESSION_HANDLE_INVALID`, `CKR_OBJECT_HANDLE_INVALID`, `CKR_ACTION_PROHIBITED` (object not copyable), `CKR_TEMPLATE_INCONSISTENT`, `CKR_ATTRIBUTE_READ_ONLY`, `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+---
+
+## C_DestroyObject
+
+Deletes an object from the token or session.
+
+```c
+CK_RV C_DestroyObject(
+    CK_SESSION_HANDLE hSession,
+    CK_OBJECT_HANDLE  hObject
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of an open session. Must be read/write to destroy a token object.
+</ParamField>
+
+<ParamField path="hObject" type="CK_OBJECT_HANDLE" required>
+  Handle of the object to destroy. After this call succeeds, the handle is no longer valid.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SESSION_HANDLE_INVALID`, `CKR_OBJECT_HANDLE_INVALID`, `CKR_SESSION_READ_ONLY`, `CKR_ACTION_PROHIBITED`, `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+<Warning>
+  Destroying a token object with `CKA_TOKEN = CK_TRUE` permanently removes it from the on-disk object store. This operation cannot be undone.
+</Warning>
+
+---
+
+## C_GetObjectSize
+
+Returns the size in bytes of an object's storage representation.
+
+```c
+CK_RV C_GetObjectSize(
+    CK_SESSION_HANDLE hSession,
+    CK_OBJECT_HANDLE  hObject,
+    CK_ULONG_PTR      pulSize
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of an open session.
+</ParamField>
+
+<ParamField path="hObject" type="CK_OBJECT_HANDLE" required>
+  Handle of the object to measure.
+</ParamField>
+
+<ParamField path="pulSize" type="CK_ULONG_PTR" required>
+  Receives the size in bytes. SoftHSM v2 may return `CK_UNAVAILABLE_INFORMATION` (`~0UL`) if the size cannot be determined.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SESSION_HANDLE_INVALID`, `CKR_OBJECT_HANDLE_INVALID`, `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+---
+
+## C_GetAttributeValue
+
+Retrieves the values of one or more attributes from an object.
+
+```c
+CK_RV C_GetAttributeValue(
+    CK_SESSION_HANDLE hSession,
+    CK_OBJECT_HANDLE  hObject,
+    CK_ATTRIBUTE_PTR  pTemplate,
+    CK_ULONG          ulCount
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of an open session.
+</ParamField>
+
+<ParamField path="hObject" type="CK_OBJECT_HANDLE" required>
+  Handle of the object whose attributes you want to read.
+</ParamField>
+
+<ParamField path="pTemplate" type="CK_ATTRIBUTE_PTR" required>
+  Array of `CK_ATTRIBUTE` structures. Set each `type` field to the desired attribute type and `pValue` to `NULL_PTR` on the first call to retrieve the sizes. On the second call, set `pValue` to an appropriately sized buffer and `ulValueLen` to its capacity.
+</ParamField>
+
+<ParamField path="ulCount" type="CK_ULONG" required>
+  Number of attributes in `pTemplate`.
+</ParamField>
+
+**Returns:** `CKR_OK` (all attributes retrieved), `CKR_ATTRIBUTE_SENSITIVE` (one or more attributes are sensitive and cannot be read — those entries have `ulValueLen` set to `CK_UNAVAILABLE_INFORMATION`), `CKR_ATTRIBUTE_TYPE_INVALID`, `CKR_BUFFER_TOO_SMALL`, `CKR_SESSION_HANDLE_INVALID`, `CKR_OBJECT_HANDLE_INVALID`, `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+<Note>
+  Sensitive key values (`CKA_VALUE` on secret keys or `CKA_PRIVATE_EXPONENT` on RSA keys) are not readable when `CKA_SENSITIVE = CK_TRUE` or `CKA_EXTRACTABLE = CK_FALSE`. The corresponding `ulValueLen` field is set to `CK_UNAVAILABLE_INFORMATION` rather than returning an error for the entire call.
+</Note>
+
+---
+
+## C_SetAttributeValue
+
+Modifies one or more attributes on an existing object.
+
+```c
+CK_RV C_SetAttributeValue(
+    CK_SESSION_HANDLE hSession,
+    CK_OBJECT_HANDLE  hObject,
+    CK_ATTRIBUTE_PTR  pTemplate,
+    CK_ULONG          ulCount
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of an open read/write session.
+</ParamField>
+
+<ParamField path="hObject" type="CK_OBJECT_HANDLE" required>
+  Handle of the object to modify. The object must have `CKA_MODIFIABLE = CK_TRUE`.
+</ParamField>
+
+<ParamField path="pTemplate" type="CK_ATTRIBUTE_PTR" required>
+  Array of `CK_ATTRIBUTE` structures, each containing the attribute type and its new value.
+</ParamField>
+
+<ParamField path="ulCount" type="CK_ULONG" required>
+  Number of attributes in `pTemplate`.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SESSION_HANDLE_INVALID`, `CKR_OBJECT_HANDLE_INVALID`, `CKR_SESSION_READ_ONLY`, `CKR_ATTRIBUTE_READ_ONLY` (attribute is immutable), `CKR_TEMPLATE_INCONSISTENT`, `CKR_ACTION_PROHIBITED`, `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+Only attributes explicitly marked as modifiable in the PKCS#11 specification may be changed. In particular, `CKA_CLASS`, `CKA_KEY_TYPE`, and sticky boolean attributes such as `CKA_SENSITIVE` (when already `CK_TRUE`) are read-only once set.
+
+---
+
+## C_FindObjectsInit / C_FindObjects / C_FindObjectsFinal
+
+Searches for objects matching a template. The search is a three-step operation.
+
+### C_FindObjectsInit
+
+Initializes an object search operation on a session.
+
+```c
+CK_RV C_FindObjectsInit(
+    CK_SESSION_HANDLE hSession,
+    CK_ATTRIBUTE_PTR  pTemplate,
+    CK_ULONG          ulCount
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of an open session.
+</ParamField>
+
+<ParamField path="pTemplate" type="CK_ATTRIBUTE_PTR">
+  Array of `CK_ATTRIBUTE` structures specifying the search criteria. An object matches if all listed attributes match. Pass `NULL_PTR` (with `ulCount = 0`) to match all accessible objects.
+</ParamField>
+
+<ParamField path="ulCount" type="CK_ULONG" required>
+  Number of attributes in `pTemplate`. Pass 0 to retrieve all objects.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SESSION_HANDLE_INVALID`, `CKR_OPERATION_ACTIVE` (a find is already in progress on this session), `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+### C_FindObjects
+
+Retrieves the next batch of matching object handles.
+
+```c
+CK_RV C_FindObjects(
+    CK_SESSION_HANDLE    hSession,
+    CK_OBJECT_HANDLE_PTR phObject,
+    CK_ULONG             ulMaxObjectCount,
+    CK_ULONG_PTR         pulObjectCount
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of the session on which `C_FindObjectsInit` was called.
+</ParamField>
+
+<ParamField path="phObject" type="CK_OBJECT_HANDLE_PTR" required>
+  Buffer that receives up to `ulMaxObjectCount` object handles.
+</ParamField>
+
+<ParamField path="ulMaxObjectCount" type="CK_ULONG" required>
+  Capacity of `phObject`. A common value is 10 or 64; call in a loop until `*pulObjectCount == 0`.
+</ParamField>
+
+<ParamField path="pulObjectCount" type="CK_ULONG_PTR" required>
+  Receives the number of handles actually written to `phObject`. When this is 0, the search is exhausted.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SESSION_HANDLE_INVALID`, `CKR_OPERATION_NOT_INITIALIZED`, `CKR_CRYPTOKI_NOT_INITIALIZED`, `CKR_ARGUMENTS_BAD`.
+
+### C_FindObjectsFinal
+
+Terminates an object search operation and releases associated resources.
+
+```c
+CK_RV C_FindObjectsFinal(
+    CK_SESSION_HANDLE hSession
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of the session on which the find operation was initialized.
+</ParamField>
+
+**Returns:** `CKR_OK`, `CKR_SESSION_HANDLE_INVALID`, `CKR_OPERATION_NOT_INITIALIZED`, `CKR_CRYPTOKI_NOT_INITIALIZED`.
+
+Always call `C_FindObjectsFinal` after a search, even if you found what you were looking for before exhausting the results.
+
+---
+
+## Example: create an AES key and search for it
+
+```c
+#include <stdio.h>
+#include <string.h>
+#include "pkcs11.h"
+
+void create_and_find_aes_key(CK_FUNCTION_LIST_PTR p11,
+                              CK_SESSION_HANDLE    session) {
+    CK_RV rv;
+    CK_OBJECT_HANDLE hKey = CK_INVALID_HANDLE;
+
+    /* --- Create a 256-bit AES token key --- */
+    CK_OBJECT_CLASS  keyClass  = CKO_SECRET_KEY;
+    CK_KEY_TYPE      keyType   = CKK_AES;
+    CK_ULONG         keyLen    = 32; /* bytes */
+    CK_BBOOL         trueVal   = CK_TRUE;
+    CK_BBOOL         falseVal  = CK_FALSE;
+    CK_UTF8CHAR      label[]   = "my-aes-256";
+    CK_BYTE          id[]      = { 0x01, 0x02 };
+
+    CK_ATTRIBUTE createTmpl[] = {
+        { CKA_CLASS,       &keyClass, sizeof(keyClass) },
+        { CKA_KEY_TYPE,    &keyType,  sizeof(keyType)  },
+        { CKA_VALUE_LEN,   &keyLen,   sizeof(keyLen)   },
+        { CKA_TOKEN,       &trueVal,  sizeof(trueVal)  },
+        { CKA_SENSITIVE,   &trueVal,  sizeof(trueVal)  },
+        { CKA_EXTRACTABLE, &falseVal, sizeof(falseVal) },
+        { CKA_ENCRYPT,     &trueVal,  sizeof(trueVal)  },
+        { CKA_DECRYPT,     &trueVal,  sizeof(trueVal)  },
+        { CKA_LABEL,       label,     strlen((char *)label) },
+        { CKA_ID,          id,        sizeof(id)       },
+    };
+
+    rv = p11->C_GenerateKey(
+        session,
+        &(CK_MECHANISM){ CKM_AES_KEY_GEN, NULL_PTR, 0 },
+        createTmpl,
+        sizeof(createTmpl) / sizeof(createTmpl[0]),
+        &hKey
+    );
+    if (rv != CKR_OK) {
+        fprintf(stderr, "C_GenerateKey failed: 0x%lx\n", rv);
+        return;
+    }
+    printf("Created AES key, handle = %lu\n", hKey);
+
+    /* --- Search for all AES secret keys on the token --- */
+    CK_OBJECT_CLASS searchClass = CKO_SECRET_KEY;
+    CK_KEY_TYPE     searchType  = CKK_AES;
+    CK_BBOOL        onToken     = CK_TRUE;
+
+    CK_ATTRIBUTE findTmpl[] = {
+        { CKA_CLASS,    &searchClass, sizeof(searchClass) },
+        { CKA_KEY_TYPE, &searchType,  sizeof(searchType)  },
+        { CKA_TOKEN,    &onToken,     sizeof(onToken)     },
+    };
+
+    rv = p11->C_FindObjectsInit(
+        session,
+        findTmpl,
+        sizeof(findTmpl) / sizeof(findTmpl[0])
+    );
+    if (rv != CKR_OK) {
+        fprintf(stderr, "C_FindObjectsInit failed: 0x%lx\n", rv);
+        return;
+    }
+
+    CK_OBJECT_HANDLE results[16];
+    CK_ULONG         found = 0;
+
+    do {
+        rv = p11->C_FindObjects(session, results, 16, &found);
+        if (rv != CKR_OK) break;
+        for (CK_ULONG i = 0; i < found; i++) {
+            /* Read the label back */
+            char labelBuf[64] = {0};
+            CK_ATTRIBUTE readTmpl[] = {
+                { CKA_LABEL, labelBuf, sizeof(labelBuf) - 1 }
+            };
+            p11->C_GetAttributeValue(session, results[i], readTmpl, 1);
+            printf("Found key handle %lu: %.*s\n",
+                   results[i],
+                   (int)readTmpl[0].ulValueLen,
+                   labelBuf);
+        }
+    } while (found > 0);
+
+    p11->C_FindObjectsFinal(session);
+}
+```
+
+<Steps>
+  <Step title="Build a creation template">
+    Set `CKA_CLASS`, `CKA_KEY_TYPE`, and all required attributes. Use `CKA_TOKEN = CK_TRUE` to persist the object across sessions.
+  </Step>
+  <Step title="Generate or create the object">
+    Call `C_GenerateKey` (for secret keys), `C_GenerateKeyPair` (for asymmetric key pairs), or `C_CreateObject` (to import existing key material).
+  </Step>
+  <Step title="Initialize a search">
+    Call `C_FindObjectsInit` with a template containing the attributes to match. An empty template matches all accessible objects.
+  </Step>
+  <Step title="Retrieve results in batches">
+    Call `C_FindObjects` in a loop until `pulObjectCount` returns 0.
+  </Step>
+  <Step title="Finalize the search">
+    Always call `C_FindObjectsFinal` to release the search context, even if you stopped early.
+  </Step>
+  <Step title="Read attributes">
+    Call `C_GetAttributeValue` with `pValue = NULL_PTR` first to determine sizes, then again with allocated buffers to retrieve values.
+  </Step>
+</Steps>

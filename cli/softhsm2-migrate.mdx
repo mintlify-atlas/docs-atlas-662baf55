@@ -1,0 +1,93 @@
+---
+title: "softhsm2-migrate"
+description: "Migrate SoftHSM v1 token databases to SoftHSM v2 format"
+---
+
+`softhsm2-migrate` migrates token databases from SoftHSM v1 to SoftHSM v2 via the PKCS#11 interface. By default it targets `libsofthsm2`, but any PKCS#11 library can be used via `--module`.
+
+<Note>
+  `softhsm2-migrate` is only available when SoftHSM v2 is built with SQLite3 support (`./configure --with-migrate`). The SoftHSM v1 database is a SQLite3 file whose location is defined in the v1 configuration file.
+</Note>
+
+```bash
+softhsm2-migrate --db path --token label [--pin PIN --no-public-key]
+```
+
+## Options
+
+<ParamField path="--db path" type="string" required>
+  Path to the SoftHSM v1 SQLite3 database file that will be migrated. The location of this file is specified in the SoftHSM v1 configuration.
+</ParamField>
+
+<ParamField path="--token label" type="string">
+  Migrate objects into the SoftHSM v2 token whose label matches `label`. Use this or `--slot` or `--serial` to identify the destination token.
+</ParamField>
+
+<ParamField path="--slot number" type="number">
+  Migrate objects into the token at the specified slot number.
+</ParamField>
+
+<ParamField path="--serial number" type="string">
+  Migrate objects into the token whose serial number matches `number`.
+</ParamField>
+
+<ParamField path="--pin PIN" type="string">
+  The user PIN for the destination SoftHSM v2 token. Required when migrating private key objects.
+</ParamField>
+
+<ParamField path="--no-public-key" type="flag">
+  Do not migrate public key objects. Only private keys and other objects are imported into the v2 token.
+</ParamField>
+
+<ParamField path="--module path" type="string">
+  Use an alternative PKCS#11 library instead of the default SoftHSM v2 library.
+</ParamField>
+
+<ParamField path="--help, -h" type="flag">
+  Show the help screen.
+</ParamField>
+
+<ParamField path="--version, -v" type="flag">
+  Show version info.
+</ParamField>
+
+## Example
+
+Migrate a v1 database into an existing v2 token named `mytoken`:
+
+```bash
+softhsm2-migrate --db /home/user/token.db --token mytoken
+```
+
+## Migration workflow
+
+<Steps>
+  <Step title="Locate the SoftHSM v1 database">
+    Find the database path in your SoftHSM v1 configuration file (typically `/etc/softhsm/softhsm.conf`). Look for the `directories.tokendir` or `0:` token entry.
+  </Step>
+  <Step title="Initialize a SoftHSM v2 token">
+    Create the destination token in v2 before migrating:
+
+    ```bash
+    softhsm2-util --init-token --free --label "mytoken" \
+      --so-pin 1234 --pin 5678
+    ```
+  </Step>
+  <Step title="Run the migration">
+    Point `--db` at the v1 database file and `--token` at the v2 token label:
+
+    ```bash
+    softhsm2-migrate --db /home/user/token.db \
+      --token mytoken --pin 5678
+    ```
+  </Step>
+  <Step title="Verify the migrated objects">
+    Use `softhsm2-util --show-slots` to confirm the token is visible, then verify your application can access the migrated keys through the PKCS#11 interface.
+  </Step>
+</Steps>
+
+## See also
+
+- [`softhsm2-util`](/cli/softhsm2-util) — token management and key import
+- [`softhsm2-keyconv`](/cli/softhsm2-keyconv) — key format conversion
+- `softhsm2.conf(5)` — SoftHSM v2 configuration reference

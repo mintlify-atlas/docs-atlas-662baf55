@@ -1,0 +1,222 @@
+---
+title: "softhsm2-util"
+description: "Complete reference for the softhsm2-util token management and import utility"
+---
+
+`softhsm2-util` is the primary support tool for `libsofthsm2`. It initializes tokens, imports key material, and manages the lifecycle of PKCS#11 tokens. It can also be used with any other PKCS#11 library via `--module`.
+
+```bash
+softhsm2-util [ACTION] [OPTIONS]
+```
+
+## Actions
+
+<ParamField path="--show-slots" type="flag">
+  Display all available slots and their current status, including whether a token is initialized and its label and serial number.
+</ParamField>
+
+<ParamField path="--show-config var" type="string">
+  Show configuration info. `var` may be one of:
+
+  - `default-pkcs11-lib` — print the path to the default PKCS#11 library.
+</ParamField>
+
+<ParamField path="--init-token" type="flag">
+  Initialize the token at a given slot, token label, or serial number. If the token is already initialized, this command reinitializes it, erasing all objects in the token. The matching Security Officer (SO) PIN must be provided when reinitializing. After initialization, the token is reassigned to a slot based on its serial number.
+
+  Use with `--slot`, `--token`, `--serial`, or `--free`; and `--label`, `--so-pin`, and `--pin`.
+
+  <Warning>Any existing content in the token will be permanently erased.</Warning>
+</ParamField>
+
+<ParamField path="--import path" type="string" required>
+  Import an object from the file at `path`. Supports keypairs (PKCS#8 PEM), AES keys (raw binary), and X.509 certificates (PEM).
+
+  Use with `--import-type`, `--slot` or `--token` or `--serial`, `--file-pin`, `--pin`, `--no-public-key`, `--label`, and `--id`.
+</ParamField>
+
+<ParamField path="--delete-token" type="flag">
+  Delete the token at a given slot. Use with `--token` or `--serial`.
+
+  <Warning>Any content in the token will be permanently erased.</Warning>
+</ParamField>
+
+<ParamField path="--help, -h" type="flag">
+  Show the help screen.
+</ParamField>
+
+<ParamField path="--version, -v" type="flag">
+  Show version info.
+</ParamField>
+
+## Options
+
+<ParamField path="--import-type type" type="string" default="keypair">
+  Specify the type of object to import. `type` may be one of:
+
+  - `keypair` *(default)* — the file must be in PKCS#8 PEM format.
+  - `aes` — the file must be in raw binary format.
+  - `cert` — the file must be in X.509 PEM format.
+</ParamField>
+
+<ParamField path="--aes" type="flag" deprecated>
+  Tells `--import` to treat the input file as-is and import it as an AES key.
+
+  <Warning>Deprecated. Use `--import-type aes` instead.</Warning>
+</ParamField>
+
+<ParamField path="--file-pin PIN" type="string">
+  The PIN used to decrypt an encrypted PKCS#8 input file. If not provided, the file is assumed to be unencrypted.
+</ParamField>
+
+<ParamField path="--force" type="flag">
+  Override warnings and force the given action. When importing a key pair, use this flag if the specified `--id` already exists in the token.
+</ParamField>
+
+<ParamField path="--free" type="flag">
+  Use the first free (uninitialized) token slot. Use with `--init-token`.
+</ParamField>
+
+<ParamField path="--id hex" type="string" required>
+  The ID to assign to the imported object. Must be provided as a hexadecimal string of variable length (e.g., `A1B2`). Use `--force` if another object with the same ID already exists.
+</ParamField>
+
+<ParamField path="--label text" type="string" required>
+  The label to assign to the object (when importing) or to the token (when initializing).
+</ParamField>
+
+<ParamField path="--module path" type="string">
+  Use an alternative PKCS#11 library instead of the default SoftHSM library. Provide the path to the `.so` or `.dylib` file.
+</ParamField>
+
+<ParamField path="--no-public-key" type="flag">
+  Do not import the public key portion of a key pair. Only the private key object is stored in the token.
+</ParamField>
+
+<ParamField path="--pin PIN" type="string">
+  The PIN for the normal (user) role. Required for operations that access token objects.
+</ParamField>
+
+<ParamField path="--serial number" type="string">
+  Select the token whose serial number matches `number`. An alternative to `--slot` and `--token`.
+</ParamField>
+
+<ParamField path="--slot number" type="number">
+  The slot number where the target token is located.
+</ParamField>
+
+<ParamField path="--so-pin PIN" type="string">
+  The PIN for the Security Officer (SO) role. Required when initializing or reinitializing a token.
+</ParamField>
+
+<ParamField path="--token label" type="string">
+  Select the token whose label matches `label`. An alternative to `--slot` and `--serial`.
+</ParamField>
+
+## Examples
+
+### Initialize a new token
+
+Use `--free` to pick the first available slot automatically:
+
+```bash
+softhsm2-util --init-token --free --label "mytoken" \
+  --so-pin 1234 --pin 5678
+```
+
+Or target a specific slot:
+
+```bash
+softhsm2-util --init-token --slot 1 --label "mytoken"
+```
+
+### List all slots
+
+```bash
+softhsm2-util --show-slots
+```
+
+### Import a key pair
+
+Import a PKCS#8 PEM key file into an existing token:
+
+```bash
+softhsm2-util --import key1.pem --token "mytoken" \
+  --label "My key" --id A1B2 --pin 123456
+```
+
+If the key file is encrypted with a PIN:
+
+```bash
+softhsm2-util --import key1.pem --token "mytoken" \
+  --label "My key" --id A1B2 --pin 123456 --file-pin secretpassword
+```
+
+### Import an AES key
+
+```bash
+softhsm2-util --import aes.key --import-type aes \
+  --token "mytoken" --label "AES key" --id 0102 --pin 123456
+```
+
+### Import an X.509 certificate
+
+```bash
+softhsm2-util --import cert.pem --import-type cert \
+  --token "mytoken" --label "My cert" --id 0304 --pin 123456
+```
+
+### Delete a token
+
+```bash
+softhsm2-util --delete-token --token "mytoken"
+```
+
+### Show the default PKCS#11 library path
+
+```bash
+softhsm2-util --show-config default-pkcs11-lib
+```
+
+### Use with a non-SoftHSM PKCS#11 library
+
+```bash
+softhsm2-util --show-slots --module /usr/lib/libmypkcs11.so
+```
+
+## Key import workflow
+
+<Steps>
+  <Step title="Prepare the key file">
+    Keys must be in PKCS#8 PEM format for keypairs, raw binary for AES, or X.509 PEM for certificates. To convert from BIND `.private-key` format, use [`softhsm2-keyconv`](/cli/softhsm2-keyconv).
+  </Step>
+  <Step title="Initialize a token">
+    If you have not already done so, create a token:
+
+    ```bash
+    softhsm2-util --init-token --free --label "mytoken" \
+      --so-pin 1234 --pin 5678
+    ```
+  </Step>
+  <Step title="Import the key">
+    Import the prepared key file into the token:
+
+    ```bash
+    softhsm2-util --import key.pem --token "mytoken" \
+      --label "My key" --id A1B2 --pin 5678
+    ```
+  </Step>
+  <Step title="Verify">
+    List slots to confirm the token and its objects are visible:
+
+    ```bash
+    softhsm2-util --show-slots
+    ```
+  </Step>
+</Steps>
+
+## See also
+
+- [`softhsm2-keyconv`](/cli/softhsm2-keyconv) — convert BIND `.private-key` files to PKCS#8
+- [`softhsm2-migrate`](/cli/softhsm2-migrate) — migrate SoftHSM v1 token databases
+- `softhsm2.conf(5)` — SoftHSM configuration file reference

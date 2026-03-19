@@ -1,0 +1,137 @@
+---
+title: "Random number generation"
+description: "Generate cryptographically secure random bytes using PKCS#11 in SoftHSM v2"
+---
+
+SoftHSM v2 exposes the PKCS#11 random number generation functions. The underlying RNG is provided by the configured crypto backend (OpenSSL or Botan) and is used internally for key generation, IV generation, and all other randomness requirements.
+
+## Functions
+
+### C_GenerateRandom
+
+Fills a caller-supplied buffer with random bytes.
+
+```c
+CK_RV C_GenerateRandom(
+    CK_SESSION_HANDLE hSession,
+    CK_BYTE_PTR       pRandomData,
+    CK_ULONG          ulRandomLen
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of any open session on the token. The session does not need to be authenticated.
+</ParamField>
+
+<ParamField path="pRandomData" type="CK_BYTE_PTR" required>
+  Pointer to the buffer that receives the random bytes.
+</ParamField>
+
+<ParamField path="ulRandomLen" type="CK_ULONG" required>
+  Number of random bytes to generate. The buffer pointed to by `pRandomData` must be at least this many bytes long.
+</ParamField>
+
+The function delegates directly to the crypto backend's RNG:
+
+- **OpenSSL backend**: uses `RAND_bytes`, which sources entropy from the OS (`/dev/urandom` on Linux).
+- **Botan backend**: uses Botan's `AutoSeeded_RNG`.
+
+<Note>
+When SoftHSM is built against a FIPS-capable OpenSSL (OpenSSL 3.x with the FIPS provider enabled), `C_GenerateRandom` automatically uses a FIPS 140-2 approved DRBG. No extra configuration is needed.
+</Note>
+
+---
+
+### C_SeedRandom
+
+Mixes additional seed material into the RNG state.
+
+```c
+CK_RV C_SeedRandom(
+    CK_SESSION_HANDLE hSession,
+    CK_BYTE_PTR       pSeed,
+    CK_ULONG          ulSeedLen
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of any open session.
+</ParamField>
+
+<ParamField path="pSeed" type="CK_BYTE_PTR" required>
+  Pointer to the seed bytes to mix in.
+</ParamField>
+
+<ParamField path="ulSeedLen" type="CK_ULONG" required>
+  Length of the seed in bytes.
+</ParamField>
+
+<Note>
+The PKCS#11 specification permits tokens to return `CKR_RANDOM_SEED_NOT_SUPPORTED` if the RNG cannot be seeded externally. SoftHSM passes the seed to the underlying backend; whether it is actually used depends on the backend's RNG implementation.
+</Note>
+
+---
+
+## Typical uses
+
+| Use case | Details |
+|---|---|
+| IV / nonce generation | Generate 12–16 random bytes before initializing AES-GCM or AES-CBC |
+| Key material | Derive session keys from random bytes when hardware key generation is unavailable |
+| Challenge-response | Generate nonces for authentication protocols |
+| Salt values | Generate random salts for password hashing or KDF inputs |
+
+<Warning>
+Do not use `C_GenerateRandom` as a substitute for `C_GenerateKey` when creating long-lived keys. Use the key generation functions so that key material is generated and stored securely within the HSM and never exposed to the application.
+</Warning>
+
+---
+
+## Error codes
+
+| Return value | Meaning |
+|---|---|
+| `CKR_OK` | Success |
+| `CKR_ARGUMENTS_BAD` | `pRandomData` is `NULL_PTR` or `ulRandomLen` is 0 |
+| `CKR_SESSION_HANDLE_INVALID` | The session handle is not valid |
+| `CKR_RANDOM_NO_RNG` | The backend RNG is unavailable |
+| `CKR_RANDOM_SEED_NOT_SUPPORTED` | The backend does not support external seeding (`C_SeedRandom` only) |
+
+---
+
+## Example
+
+```c
+#include <pkcs11.h>
+
+/*
+ * Generate a 12-byte (96-bit) random IV suitable for AES-GCM,
+ * and a 32-byte random nonce.
+ */
+void generate_random_values(CK_SESSION_HANDLE hSession)
+{
+    CK_BYTE iv[12];
+    CK_BYTE nonce[32];
+
+    /* Generate IV */
+    CK_RV rv = C_GenerateRandom(hSession, iv, sizeof(iv));
+    if (rv != CKR_OK) { /* handle error */ return; }
+
+    /* Generate nonce */
+    rv = C_GenerateRandom(hSession, nonce, sizeof(nonce));
+    if (rv != CKR_OK) { return; }
+
+    /* iv and nonce now contain cryptographically secure random bytes */
+}
+
+/*
+ * Optionally seed the RNG with additional entropy from an
+ * application-specific source.
+ */
+void seed_rng(CK_SESSION_HANDLE hSession, CK_BYTE *appEntropy, CK_ULONG entropyLen)
+{
+    CK_RV rv = C_SeedRandom(hSession, appEntropy, entropyLen);
+    /* CKR_RANDOM_SEED_NOT_SUPPORTED is acceptable — not a hard error */
+    (void)rv;
+}
+```

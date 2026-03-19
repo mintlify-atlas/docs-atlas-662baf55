@@ -1,0 +1,120 @@
+---
+title: "OpenSSL backend"
+description: "Using OpenSSL as the cryptographic backend for SoftHSM v2"
+---
+
+OpenSSL is the default cryptographic backend for SoftHSM v2. It is implemented by `OSSLCryptoFactory`, which provides OpenSSL-backed instances of every algorithm class that `CryptoFactory` defines.
+
+## Requirements
+
+- OpenSSL **1.0.0** or later
+- OpenSSL **3.x** is required for ML-DSA (post-quantum) support
+
+## Selecting the backend
+
+<Tabs>
+  <Tab title="Autotools">
+    ```bash
+    ./configure --with-crypto-backend=openssl
+    ```
+
+    OpenSSL is also the default when `--with-crypto-backend` is omitted.
+  </Tab>
+  <Tab title="CMake">
+    ```bash
+    cmake -DWITH_CRYPTO_BACKEND=openssl .
+    ```
+  </Tab>
+</Tabs>
+
+## Pointing to a custom OpenSSL installation
+
+If OpenSSL is installed in a non-standard prefix, use `--with-openssl`:
+
+```bash
+./configure --with-crypto-backend=openssl --with-openssl=/opt/openssl-3.x
+```
+
+The build system appends `/include` and `/lib` to the path you supply.
+
+## Supported algorithms
+
+### Asymmetric
+
+| Algorithm | Notes |
+|---|---|
+| RSA | All standard key sizes |
+| DSA | |
+| ECDSA | Requires `--enable-ecc` (auto-detected) |
+| ECDH | Requires `--enable-ecc` (auto-detected) |
+| EdDSA | Requires `--enable-eddsa` (auto-detected) |
+| DH | |
+| GOST | Requires `--enable-gost` (auto-detected) |
+| ML-DSA | Requires `--enable-mldsa` (auto-detected) and OpenSSL 3.x |
+
+### Symmetric
+
+| Algorithm | Notes |
+|---|---|
+| AES | CBC, ECB, CTR, GCM, XTS, OFB, CFB |
+| 3DES | CBC, ECB, OFB, CFB |
+
+### Hash
+
+| Algorithm |
+|---|
+| MD5 |
+| SHA-1 |
+| SHA-224 |
+| SHA-256 |
+| SHA-384 |
+| SHA-512 |
+| GOST R 34.11-94 (if GOST enabled) |
+
+### MAC
+
+| Algorithm |
+|---|
+| HMAC-MD5 |
+| HMAC-SHA-1 |
+| HMAC-SHA-224 |
+| HMAC-SHA-256 |
+| HMAC-SHA-384 |
+| HMAC-SHA-512 |
+| CMAC-AES |
+| CMAC-3DES |
+
+## OpenSSL engines
+
+SoftHSM supports OpenSSL engines (e.g. to offload operations to hardware). Engine support is compiled in by default when the OpenSSL headers expose the engine API.
+
+<Note>
+Engine support was added in SoftHSM 2.7.0.
+</Note>
+
+To disable engine loading at build time:
+
+```bash
+./configure --with-crypto-backend=openssl --disable-openssl-engines
+```
+
+When engines are enabled, `OSSLCryptoFactory` loads the `rdrand` engine (if available) as the RNG source, and the GOST engine when GOST support is compiled in.
+
+## Post-quantum ML-DSA
+
+ML-DSA (FIPS 204, formerly CRYSTALS-Dilithium) is available when:
+
+1. OpenSSL 3.x is present at build time.
+2. `--enable-mldsa` is in effect (it is auto-detected by default).
+
+```bash
+./configure --with-crypto-backend=openssl --with-openssl=/opt/openssl-3 --enable-mldsa
+```
+
+<Warning>
+ML-DSA is only available with the OpenSSL backend. If you need post-quantum support, do not use the Botan backend.
+</Warning>
+
+## FIPS 140-2
+
+The OpenSSL backend can operate with a FIPS 140-2 capable OpenSSL build. See [FIPS 140-2](/crypto/fips) for build instructions.

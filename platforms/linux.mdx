@@ -1,0 +1,198 @@
+---
+title: "Linux"
+description: "Installing and running SoftHSM v2 on Linux"
+---
+
+SoftHSM v2 is well-tested on Linux and is available as a package on most major distributions. You can install it from your distribution's package manager or build it from source.
+
+## Tested distributions
+
+- Debian and Ubuntu (stable releases)
+- RHEL, CentOS, and Fedora
+
+## Install dependencies
+
+<Tabs>
+  <Tab title="Debian / Ubuntu">
+    ```bash
+    sudo apt-get install \
+      libssl-dev \
+      autoconf \
+      automake \
+      libtool \
+      pkg-config \
+      libsqlite3-dev \
+      libcppunit-dev
+    ```
+  </Tab>
+  <Tab title="RHEL / CentOS / Fedora">
+    ```bash
+    sudo dnf install \
+      openssl-devel \
+      autoconf \
+      automake \
+      libtool \
+      libtool-ltdl-devel \
+      pkg-config \
+      sqlite-devel
+    ```
+
+    <Note>
+      On older RHEL/CentOS systems, use `yum` instead of `dnf`. CppUnit is not packaged in the default repositories; you may need to build it from source or install it from EPEL.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Build and install
+
+<Steps>
+  <Step title="Prepare the build system">
+    If you cloned the repository directly (rather than downloading a release tarball), generate the configure script first:
+
+    ```bash
+    sh autogen.sh
+    ```
+  </Step>
+  <Step title="Configure">
+    ```bash
+    ./configure --with-crypto-backend=openssl
+    ```
+
+    Useful options:
+
+    | Option | Description |
+    |---|---|
+    | `--with-crypto-backend=openssl\|botan` | Select the cryptographic backend |
+    | `--with-objectstore-backend-db` | Enable the SQLite3 object store |
+    | `--with-migrate` | Build the SoftHSM v1 migration tool (requires SQLite3) |
+    | `--disable-non-paged-memory` | Disable non-paged (locked) memory |
+    | `--disable-p11-kit` | Disable p11-kit integration |
+    | `--with-p11-kit=PATH` | Override the p11-kit module install path |
+
+    Run `./configure --help` for the full list of options.
+  </Step>
+  <Step title="Compile">
+    ```bash
+    make
+    ```
+  </Step>
+  <Step title="Run tests (optional)">
+    Running the unit tests requires CppUnit to be installed.
+
+    ```bash
+    make check
+    ```
+  </Step>
+  <Step title="Install">
+    ```bash
+    sudo make install
+    ```
+  </Step>
+</Steps>
+
+## Default install paths
+
+After installation, the key files are placed at:
+
+| File | Default path |
+|---|---|
+| PKCS#11 library | `/usr/local/lib/softhsm/libsofthsm2.so` |
+| Configuration file | `/etc/softhsm2.conf` |
+| `softhsm2-util` | `/usr/local/bin/softhsm2-util` |
+
+You can override the configuration file location with the `SOFTHSM2_CONF` environment variable:
+
+```bash
+export SOFTHSM2_CONF=/home/user/softhsm2.conf
+```
+
+## Logging
+
+On Linux, SoftHSM sends log output to **syslog**. The log level is controlled by the `log.level` setting in `softhsm2.conf`:
+
+```
+log.level = INFO
+```
+
+Valid levels are `ERROR`, `WARNING`, `INFO`, and `DEBUG`. Each log entry is prefixed with the source file name and line number.
+
+To view SoftHSM log output:
+
+```bash
+journalctl -t softhsm2 -f
+# or, on systems using syslog directly:
+tail -f /var/log/syslog
+```
+
+## Non-paged memory (mlock)
+
+By default, SoftHSM uses **non-paged memory** (`mlock`) to prevent sensitive key material from being swapped to disk.
+
+<Warning>
+  Locking memory pages requires elevated privileges. If SoftHSM is run as an unprivileged user, `mlock` calls may fail silently and key material may not be protected.
+</Warning>
+
+To allow a non-root user to lock memory, grant the `CAP_IPC_LOCK` capability to the binary:
+
+```bash
+sudo setcap cap_ipc_lock+ep /usr/local/bin/softhsm2-util
+```
+
+Alternatively, raise the `memlock` limit for the user in `/etc/security/limits.conf`:
+
+```
+# /etc/security/limits.conf
+youruser  soft  memlock  65536
+youruser  hard  memlock  65536
+```
+
+If your deployment does not require this protection, you can disable it at build time:
+
+```bash
+./configure --disable-non-paged-memory
+```
+
+## p11-kit integration
+
+[p11-kit](https://p11-glue.github.io/p11-glue/p11-kit.html) provides a standard way to register PKCS#11 modules system-wide on Linux. Applications that use p11-kit (such as GnuTLS and NSS) will automatically discover SoftHSM when it is registered.
+
+### Install the p11-kit development package
+
+<Tabs>
+  <Tab title="Debian / Ubuntu">
+    ```bash
+    sudo apt-get install libp11-kit-dev
+    ```
+  </Tab>
+  <Tab title="RHEL / CentOS / Fedora">
+    ```bash
+    sudo dnf install p11-kit-devel
+    ```
+  </Tab>
+</Tabs>
+
+### Build with p11-kit support
+
+p11-kit integration is enabled by default when `libp11-kit-dev` is present. To build without it:
+
+```bash
+./configure --disable-p11-kit
+```
+
+To specify a custom module install path:
+
+```bash
+./configure --with-p11-kit=/usr/share/p11-kit/modules
+```
+
+### Register the module
+
+After installation, SoftHSM registers itself by placing a module descriptor file in the p11-kit search path (typically `/usr/share/p11-kit/modules/` or `/etc/pkcs11/modules/`). You can verify that p11-kit discovers it:
+
+```bash
+p11-kit list-modules
+```
+
+<Tip>
+  If you install SoftHSM to a non-default prefix, pass `--with-p11-kit=PATH` to `configure` so the module file lands in a directory that p11-kit scans.
+</Tip>

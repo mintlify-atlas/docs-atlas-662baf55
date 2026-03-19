@@ -1,0 +1,130 @@
+---
+title: "Logging"
+description: "Configure log levels and understand SoftHSM v2 log output"
+---
+
+SoftHSM v2 emits log messages through the system logging facility (syslog on Linux and macOS, Windows Event Log on Windows), or to a file when `log.file` is configured. Both the verbosity and the destination are controlled through the configuration file.
+
+## Log levels
+
+The `log.level` option sets the minimum severity required for a message to be emitted. Messages below the configured level are silently discarded.
+
+```ini
+# ERROR, WARNING, INFO, DEBUG
+log.level = ERROR
+```
+
+The four levels, from least to most verbose:
+
+| Level | Syslog priority | When to use |
+|---|---|---|
+| `ERROR` | `LOG_ERR` | Production deployments (default). Only genuine errors are logged. |
+| `WARNING` | `LOG_WARNING` | Captures non-fatal conditions such as missing optional config keys. |
+| `INFO` | `LOG_INFO` | Logs notable events — token initialisation, session open/close, and so on. |
+| `DEBUG` | `LOG_DEBUG` | Full internal tracing. Generates a high volume of output; use only when diagnosing a specific problem. |
+
+<Warning>
+The `DEBUG` level logs every internal operation including cryptographic calls. Do not use `DEBUG` in production; it can fill log storage quickly and may expose sensitive operational details.
+</Warning>
+
+### Changing the log level
+
+The log level can only be changed by editing the configuration file. There is no signal or API to adjust it at runtime without reloading. Because SoftHSM is a shared library loaded in-process by an application, the configuration is re-read only when the application initialises the PKCS#11 library (calls `C_Initialize`).
+
+To increase verbosity for a running application you must:
+
+1. Stop the application.
+2. Edit `log.level` in the configuration file.
+3. Restart the application.
+
+---
+
+## Log destinations
+
+### syslog (Linux and macOS)
+
+By default, all log messages are sent to syslog using the standard `syslog(3)` facility. Messages appear in the system journal or `/var/log/syslog` depending on the syslog daemon configuration.
+
+To view SoftHSM messages from the system journal:
+
+```bash
+journalctl -t softhsm2 -f
+```
+
+Because syslog is the default destination, no additional configuration is required.
+
+### Windows Event Log
+
+On Windows, messages are written to the Windows Event Log through the same syslog-compatible interface.
+
+### Log file
+
+To redirect log output from syslog to a file, set `log.file`:
+
+```ini
+log.level = INFO
+log.file = /var/log/softhsm2.log
+```
+
+The file is opened in **append** mode. If the specified file cannot be opened, SoftHSM falls back to syslog and logs a warning.
+
+<Note>
+There is no built-in log rotation. If you use `log.file`, configure an external log rotation tool (such as `logrotate`) to manage file growth.
+</Note>
+
+---
+
+## Log message format
+
+Every log message is prepended with the **source file name and line number** from the SoftHSM source code where the message originated. This is always enabled and cannot be disabled at runtime.
+
+When logging to syslog:
+
+```
+SoftHSM.cpp(512): Could not open token directory
+```
+
+When logging to a file, messages include a timestamp and process ID:
+
+```
+2026-01-20 14:32:01.042 [12345] ERROR: SoftHSM.cpp(512): Could not open token directory
+```
+
+The file log format is:
+
+```
+<timestamp>.<milliseconds> [<pid>] <LEVEL>: <source-file>(<line>): <message>
+```
+
+---
+
+## Common log messages
+
+### Configuration warning on startup
+
+```
+SimpleConfigLoader.cpp(174): The following configuration is not supported: unknown_key = value
+```
+
+An unrecognised key was found in the configuration file. Check for typos.
+
+### Token directory not found
+
+```
+ObjectStore.cpp(xx): Failed to open directory /var/lib/softhsm/tokens/
+```
+
+The path specified in `directories.tokendir` does not exist or is not readable. Create the directory before loading the library:
+
+```bash
+mkdir -p /var/lib/softhsm/tokens
+chmod 700 /var/lib/softhsm/tokens
+```
+
+### Missing configuration key
+
+```
+Configuration.cpp(98): Missing directories.tokendir in configuration. Using default value: /var/lib/softhsm/tokens/
+```
+
+A configuration key was absent from the file; the built-in default was used. This is a `WARNING`-level message and only appears when `log.level` is `WARNING` or more verbose.

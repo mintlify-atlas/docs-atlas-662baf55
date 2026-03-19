@@ -1,0 +1,218 @@
+---
+title: "Digest (hashing)"
+description: "Compute cryptographic digests using PKCS#11 in SoftHSM v2"
+---
+
+SoftHSM v2 exposes the PKCS#11 digest function family for computing cryptographic hash values. Both single-part and multi-part operations are supported.
+
+## Functions
+
+### C_DigestInit
+
+Initializes a digest operation on a session.
+
+```c
+CK_RV C_DigestInit(
+    CK_SESSION_HANDLE hSession,
+    CK_MECHANISM_PTR  pMechanism
+);
+```
+
+<ParamField path="hSession" type="CK_SESSION_HANDLE" required>
+  Handle of the open session.
+</ParamField>
+
+<ParamField path="pMechanism" type="CK_MECHANISM_PTR" required>
+  Pointer to a `CK_MECHANISM` structure that specifies the hash algorithm. No mechanism parameters are required; `pParameter` should be `NULL_PTR` and `ulParameterLen` should be 0.
+</ParamField>
+
+You must call `C_DigestInit` before any other digest function. If another operation is already active on the session, `CKR_OPERATION_ACTIVE` is returned.
+
+---
+
+### C_Digest
+
+Computes the hash of data in a single-part operation.
+
+```c
+CK_RV C_Digest(
+    CK_SESSION_HANDLE hSession,
+    CK_BYTE_PTR       pData,
+    CK_ULONG          ulDataLen,
+    CK_BYTE_PTR       pDigest,
+    CK_ULONG_PTR      pulDigestLen
+);
+```
+
+<ParamField path="pData" type="CK_BYTE_PTR" required>
+  Pointer to the data to hash.
+</ParamField>
+
+<ParamField path="ulDataLen" type="CK_ULONG" required>
+  Length of `pData` in bytes.
+</ParamField>
+
+<ParamField path="pDigest" type="CK_BYTE_PTR">
+  Buffer to receive the digest. Pass `NULL_PTR` on the first call to obtain the required buffer size.
+</ParamField>
+
+<ParamField path="pulDigestLen" type="CK_ULONG_PTR" required>
+  On input: size of `pDigest`. On output: number of bytes written (or required size if `pDigest` is `NULL_PTR`).
+</ParamField>
+
+<Tip>
+Use the two-pass pattern. Call `C_Digest` with `pDigest = NULL_PTR` — the function writes the hash output size to `*pulDigestLen` and returns `CKR_OK`. Allocate the buffer, then call again to produce the actual digest.
+</Tip>
+
+---
+
+### C_DigestUpdate
+
+Continues a multi-part digest with an additional chunk of data.
+
+```c
+CK_RV C_DigestUpdate(
+    CK_SESSION_HANDLE hSession,
+    CK_BYTE_PTR       pPart,
+    CK_ULONG          ulPartLen
+);
+```
+
+<ParamField path="pPart" type="CK_BYTE_PTR" required>
+  Pointer to the next chunk of data.
+</ParamField>
+
+<ParamField path="ulPartLen" type="CK_ULONG" required>
+  Length of this chunk in bytes.
+</ParamField>
+
+Call `C_DigestUpdate` one or more times, then call `C_DigestFinal` to obtain the digest.
+
+---
+
+### C_DigestKey
+
+Includes the value of a secret key in the ongoing digest computation.
+
+```c
+CK_RV C_DigestKey(
+    CK_SESSION_HANDLE hSession,
+    CK_OBJECT_HANDLE  hObject
+);
+```
+
+<ParamField path="hObject" type="CK_OBJECT_HANDLE" required>
+  Handle of a secret key whose value is to be included in the digest. The key must be a `CKO_SECRET_KEY` object.
+</ParamField>
+
+`C_DigestKey` is typically used to hash the raw key material of a secret key without ever exposing the key value to the calling application. You can interleave calls to `C_DigestKey` and `C_DigestUpdate` freely during a multi-part operation.
+
+---
+
+### C_DigestFinal
+
+Finishes a multi-part digest operation and returns the resulting hash.
+
+```c
+CK_RV C_DigestFinal(
+    CK_SESSION_HANDLE hSession,
+    CK_BYTE_PTR       pDigest,
+    CK_ULONG_PTR      pulDigestLen
+);
+```
+
+<ParamField path="pDigest" type="CK_BYTE_PTR">
+  Buffer to receive the final digest. Pass `NULL_PTR` to query the required size without consuming the operation.
+</ParamField>
+
+<ParamField path="pulDigestLen" type="CK_ULONG_PTR" required>
+  On input: size of `pDigest`. On output: number of bytes written (or required size).
+</ParamField>
+
+After `C_DigestFinal` returns successfully, the digest operation is cleared. You must call `C_DigestInit` again before starting another digest.
+
+---
+
+## Supported hash mechanisms
+
+| Mechanism | Output size | Notes |
+|---|---|---|
+| `CKM_MD5` | 16 bytes | Not available in FIPS mode |
+| `CKM_SHA_1` | 20 bytes | |
+| `CKM_SHA224` | 28 bytes | |
+| `CKM_SHA256` | 32 bytes | |
+| `CKM_SHA384` | 48 bytes | |
+| `CKM_SHA512` | 64 bytes | |
+| `CKM_GOSTR3411` | 32 bytes | GOST R 34.11-94; requires `WITH_GOST` build |
+
+All mechanisms require `pMechanism->pParameter = NULL_PTR` and `pMechanism->ulParameterLen = 0`; any non-NULL parameter returns `CKR_ARGUMENTS_BAD`.
+
+---
+
+## Error codes
+
+| Return value | Meaning |
+|---|---|
+| `CKR_OK` | Success |
+| `CKR_ARGUMENTS_BAD` | `pData` or `pulDigestLen` is `NULL_PTR` |
+| `CKR_MECHANISM_INVALID` | Hash algorithm not supported |
+| `CKR_OPERATION_ACTIVE` | Another operation is already running on this session |
+| `CKR_OPERATION_NOT_INITIALIZED` | `C_DigestInit` was not called |
+| `CKR_BUFFER_TOO_SMALL` | Output buffer too small; required size written to `*pulDigestLen` |
+
+---
+
+## Example: SHA-256 digest
+
+```c
+#include <stdlib.h>
+#include <pkcs11.h>
+
+/*
+ * Compute a SHA-256 digest using the single-part C_Digest call.
+ * pDigestOut must point to a buffer of at least 32 bytes.
+ */
+void sha256_digest(CK_SESSION_HANDLE hSession,
+                   CK_BYTE *data, CK_ULONG dataLen,
+                   CK_BYTE *pDigestOut, CK_ULONG *pulDigestOutLen)
+{
+    CK_MECHANISM mechanism = { CKM_SHA256, NULL_PTR, 0 };
+
+    CK_RV rv = C_DigestInit(hSession, &mechanism);
+    if (rv != CKR_OK) { return; }
+
+    /* First pass: query digest size */
+    CK_ULONG digestLen = 0;
+    rv = C_Digest(hSession, data, dataLen, NULL_PTR, &digestLen);
+    if (rv != CKR_OK) { return; }
+
+    /* digestLen == 32 for SHA-256 */
+    rv = C_Digest(hSession, data, dataLen, pDigestOut, &digestLen);
+    if (rv == CKR_OK)
+        *pulDigestOutLen = digestLen;
+}
+
+/*
+ * Compute a SHA-256 digest of multiple data chunks using the
+ * multi-part C_DigestUpdate / C_DigestFinal pattern.
+ */
+void sha256_multipart(CK_SESSION_HANDLE hSession,
+                      CK_BYTE **chunks, CK_ULONG *chunkLens, CK_ULONG numChunks,
+                      CK_BYTE *pDigestOut, CK_ULONG *pulDigestOutLen)
+{
+    CK_MECHANISM mechanism = { CKM_SHA256, NULL_PTR, 0 };
+
+    CK_RV rv = C_DigestInit(hSession, &mechanism);
+    if (rv != CKR_OK) { return; }
+
+    for (CK_ULONG i = 0; i < numChunks; i++) {
+        rv = C_DigestUpdate(hSession, chunks[i], chunkLens[i]);
+        if (rv != CKR_OK) { return; }
+    }
+
+    CK_ULONG digestLen = 32;
+    rv = C_DigestFinal(hSession, pDigestOut, &digestLen);
+    if (rv == CKR_OK)
+        *pulDigestOutLen = digestLen;
+}
+```

@@ -1,0 +1,189 @@
+---
+title: "CMake build"
+description: "Build and install SoftHSM v2 using CMake"
+---
+
+## Prerequisites
+
+- **CMake** >= 3.16
+- **OpenSSL** (>= 1.0.0) or **Botan** (>= 2.0.0) — cryptographic backend
+- **CppUnit** — required to build and run tests (`-DBUILD_TESTS=ON`)
+- **SQLite3** (>= 3.4.2) — required when enabling the migration tool or database object store
+- A C++11-capable compiler (GCC, Clang, or MSVC)
+
+## Build steps
+
+<Steps>
+  <Step title="Configure the build">
+    Run CMake from the source root, placing build artefacts in a `build` subdirectory:
+
+    ```bash
+    cmake -H. -Bbuild
+    ```
+
+    Pass any options as `-D` flags on the same command line:
+
+    ```bash
+    cmake -H. -Bbuild -DWITH_CRYPTO_BACKEND=openssl -DBUILD_TESTS=ON
+    ```
+  </Step>
+
+  <Step title="Compile">
+    ```bash
+    make -C build
+    ```
+  </Step>
+
+  <Step title="Run tests (optional)">
+    Requires `-DBUILD_TESTS=ON` during configuration.
+
+    ```bash
+    cd build
+    ctest -V
+    ```
+  </Step>
+
+  <Step title="Install">
+    ```bash
+    sudo make -C build install
+    ```
+  </Step>
+</Steps>
+
+## CMake options
+
+### Testing
+
+| Option | Default | Description |
+|---|---|---|
+| `-DBUILD_TESTS=ON` | `OFF` | Compile the test suite along with the library. |
+
+### Memory
+
+| Option | Default | Description |
+|---|---|---|
+| `-DDISABLE_NON_PAGED_MEMORY=ON` | `OFF` | Disable non-paged memory for secure storage. |
+
+### Algorithm support
+
+| Option | Default | Description |
+|---|---|---|
+| `-DENABLE_ECC=ON` | `ON` | Enable ECC support. |
+| `-DENABLE_EDDSA=ON` | `ON` | Enable EdDSA (Ed25519, Ed448) support. |
+| `-DENABLE_MLDSA=ON` | `OFF` | Enable ML-DSA (FIPS 204 post-quantum signature scheme) support. |
+| `-DENABLE_GOST=ON` | `OFF` | Enable GOST algorithm support. |
+
+### Crypto backend
+
+| Option | Default | Description |
+|---|---|---|
+| `-DWITH_CRYPTO_BACKEND=openssl\|botan` | `openssl` | Select the cryptographic backend. |
+
+```bash
+# Use Botan instead of OpenSSL
+cmake -H. -Bbuild -DWITH_CRYPTO_BACKEND=botan
+```
+
+### Migration tool and object store
+
+| Option | Default | Description |
+|---|---|---|
+| `-DWITH_MIGRATE=ON` | `OFF` | Build `softhsm2-migrate` for converting SoftHSM v1 databases. Requires SQLite3. |
+| `-DWITH_OBJECTSTORE_BACKEND_DB=ON` | `OFF` | Enable the SQLite3 database object store. Automatically enables `WITH_MIGRATE`. |
+
+## Windows-specific notes
+
+On Windows, the recommended approach is to use **vcpkg** for dependency management and the **Visual Studio** generator for CMake.
+
+### Required software
+
+- [Visual Studio](https://visualstudio.microsoft.com/vs/community/) (Community edition is sufficient)
+- [vcpkg](https://vcpkg.io/) — C/C++ dependency manager from Microsoft
+- [CMake](https://cmake.org/)
+
+### Install dependencies with vcpkg
+
+<Tabs>
+  <Tab title="32-bit (x86)">
+    ```bat
+    set VCPKG_HOME=C:\Projects\vcpkg
+    git clone https://github.com/Microsoft/vcpkg.git %VCPKG_HOME%
+    cd %VCPKG_HOME%
+    bootstrap-vcpkg.bat
+
+    vcpkg install cppunit:x86-windows
+    vcpkg install cppunit:x86-windows-static
+    vcpkg install openssl-windows:x86-windows
+    vcpkg install botan:x86-windows
+    vcpkg install sqlite3:x86-windows
+
+    vcpkg integrate install
+    ```
+  </Tab>
+  <Tab title="64-bit (x64)">
+    ```bat
+    set VCPKG_HOME=C:\Projects\vcpkg
+    git clone https://github.com/Microsoft/vcpkg.git %VCPKG_HOME%
+    cd %VCPKG_HOME%
+    bootstrap-vcpkg.bat
+
+    vcpkg install cppunit:x64-windows
+    vcpkg install cppunit:x64-windows-static
+    vcpkg install openssl-windows:x64-windows
+    vcpkg install botan:x64-windows
+    vcpkg install sqlite3:x64-windows
+
+    vcpkg integrate install
+    ```
+  </Tab>
+</Tabs>
+
+### Configure and build
+
+<Tabs>
+  <Tab title="32-bit (x86)">
+    ```bat
+    set SOFTHSM_HOME=C:\Projects\SoftHSMv2
+
+    mkdir %SOFTHSM_HOME%\tmp32
+    cd %SOFTHSM_HOME%\tmp32
+    cmake .. -G "Visual Studio 15 2017" -A Win32 ^
+        -DCMAKE_TOOLCHAIN_FILE=%VCPKG_HOME%\scripts\buildsystems\vcpkg.cmake ^
+        -DCMAKE_INSTALL_PREFIX=%SOFTHSM_HOME%\out32 ^
+        -DBUILD_TESTS=ON ^
+        -DWITH_CRYPTO_BACKEND=openssl ^
+        -DWITH_OBJECTSTORE_BACKEND_DB=OFF
+    ```
+  </Tab>
+  <Tab title="64-bit (x64)">
+    ```bat
+    set SOFTHSM_HOME=C:\Projects\SoftHSMv2
+
+    mkdir %SOFTHSM_HOME%\tmp64
+    cd %SOFTHSM_HOME%\tmp64
+    cmake .. -G "Visual Studio 15 2017" -A x64 ^
+        -DCMAKE_TOOLCHAIN_FILE=%VCPKG_HOME%\scripts\buildsystems\vcpkg.cmake ^
+        -DCMAKE_INSTALL_PREFIX=%SOFTHSM_HOME%\out64 ^
+        -DBUILD_TESTS=ON ^
+        -DWITH_CRYPTO_BACKEND=botan ^
+        -DWITH_OBJECTSTORE_BACKEND_DB=ON
+    ```
+  </Tab>
+</Tabs>
+
+### Compile, test, and install (Windows)
+
+```bat
+# Compile
+cmake --build . --config RelWithDebInfo
+
+# Run tests
+ctest -C RelWithDebInfo --output-on-failure --progress --verbose
+
+# Install
+cmake -DCMAKE_INSTALL_CONFIG_NAME=RelWithDebInfo -P cmake_install.cmake
+```
+
+<Note>
+  The `-DWITH_OBJECTSTORE_BACKEND_DB=ON` flag automatically enables `-DWITH_MIGRATE=ON` and links SQLite3.
+</Note>

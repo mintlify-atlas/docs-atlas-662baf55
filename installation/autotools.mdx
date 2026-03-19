@@ -1,0 +1,143 @@
+---
+title: "Autotools build"
+description: "Build and install SoftHSM v2 using GNU Autotools"
+---
+
+## Prerequisites
+
+The following tools must be installed before building SoftHSM v2 with Autotools:
+
+- **autoconf**, **automake**, **libtool** — GNU build system toolchain
+- **pkg-config** — helps the configure script locate installed libraries
+- **OpenSSL** (>= 1.0.0) or **Botan** (>= 2.0.0) — cryptographic backend (one is required)
+- **CppUnit** — required only to run the unit test suite
+- **SQLite3** (>= 3.4.2) — required when building the migration tool (`--with-migrate`) or the database object store (`--with-objectstore-backend-db`)
+- **libp11-kit-dev** — required to register SoftHSM as a system PKCS#11 module
+
+<Tip>
+  If you are using Botan, use version 2.6.0 or later. This improves performance for public key operations.
+</Tip>
+
+## Build steps
+
+<Steps>
+  <Step title="Generate the configure script (git builds only)">
+    If you cloned the source from the git repository rather than downloading a release tarball, you must generate the configure script before proceeding:
+
+    ```bash
+    sh autogen.sh
+    ```
+
+    This requires `automake`, `autoconf`, and `libtool` to be installed. Release tarballs already include the generated `configure` script; skip this step if you are building from a tarball.
+  </Step>
+
+  <Step title="Configure the build">
+    Run `./configure` with any options appropriate for your environment:
+
+    ```bash
+    ./configure
+    ```
+
+    For a full list of available options:
+
+    ```bash
+    ./configure --help
+    ```
+  </Step>
+
+  <Step title="Compile">
+    ```bash
+    make
+    ```
+  </Step>
+
+  <Step title="Run unit tests (optional)">
+    Requires CppUnit to be installed:
+
+    ```bash
+    make check
+    ```
+  </Step>
+
+  <Step title="Install">
+    ```bash
+    sudo make install
+    ```
+  </Step>
+</Steps>
+
+## Configure options
+
+### Memory
+
+| Option | Description |
+|---|---|
+| `--disable-non-paged-memory` | Disable non-paged memory for secure storage. Non-paged memory is enabled by default to prevent key material from being swapped to disk. |
+
+### Algorithm support
+
+All algorithm flags default to auto-detection based on what the selected crypto backend supports.
+
+| Option | Description |
+|---|---|
+| `--enable-ecc` | Enable support for Elliptic Curve Cryptography (ECC). |
+| `--enable-gost` | Enable support for GOST algorithms. |
+| `--enable-eddsa` | Enable support for EdDSA (Ed25519, Ed448). |
+| `--enable-mldsa` | Enable support for ML-DSA (FIPS 204 post-quantum signature scheme). |
+
+### Crypto backend
+
+| Option | Description |
+|---|---|
+| `--with-crypto-backend=openssl\|botan` | Select the cryptographic backend library. Defaults to OpenSSL. |
+| `--with-openssl=PATH` | Specify the prefix path of a non-default OpenSSL installation. |
+| `--with-botan=PATH` | Specify the prefix path of a non-default Botan installation. |
+
+```bash
+# Example: use Botan from a custom prefix
+./configure --with-crypto-backend=botan --with-botan=/opt/botan
+```
+
+### Migration tool
+
+| Option | Description |
+|---|---|
+| `--with-migrate` | Build the `softhsm2-migrate` tool for converting SoftHSM v1 token databases. Requires SQLite3. |
+
+### Object store backend
+
+| Option | Description |
+|---|---|
+| `--with-objectstore-backend-db` | Build with the SQLite3 database object store as an alternative to the default file-based store. |
+| `--with-sqlite3=PATH` | Specify the prefix path of a non-default SQLite3 installation. |
+
+### p11-kit integration
+
+| Option | Description |
+|---|---|
+| `--disable-p11-kit` | Disable p11-kit integration. p11-kit integration is enabled by default when `libp11-kit-dev` is detected. |
+| `--with-p11-kit=PATH` | Override the p11-kit module install path detected by pkg-config. |
+
+### Visibility
+
+| Option | Description |
+|---|---|
+| `--disable-visibility` | Disable hidden symbol visibility link mode. Hidden visibility is enabled by default. |
+
+## Post-install
+
+After `sudo make install`, the shared library is installed to the system library directory. On a typical Linux system the path is:
+
+```
+/usr/local/lib/softhsm/libsofthsm2.so
+```
+
+The exact path depends on the `--prefix` and `--libdir` values passed to `./configure`. To confirm the installed location:
+
+```bash
+find /usr/local/lib /usr/lib -name 'libsofthsm2.so' 2>/dev/null
+```
+
+<Note>
+  The default configuration file is `/etc/softhsm2.conf`. You can override this location by setting the `SOFTHSM2_CONF` environment variable.
+</Note>
