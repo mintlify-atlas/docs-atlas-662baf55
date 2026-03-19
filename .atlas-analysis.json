@@ -1,0 +1,155 @@
+{
+  "projectType": "infrastructure",
+  "projectName": "SoftHSM v2",
+  "projectDescription": "A software implementation of a Hardware Security Module (HSM) with a full PKCS#11 interface, enabling cryptographic key management and operations without physical hardware.",
+  "theme": "aspen",
+  "primaryColor": "#1a6b8c",
+  "lightColor": "#e8f4f8",
+  "darkColor": "#0d3d52",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "introduction",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Installation",
+            "pages": [
+              "installation/autotools",
+              "installation/cmake",
+              "installation/platforms"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/softhsm2-conf",
+              "configuration/object-store",
+              "configuration/logging",
+              "configuration/mechanisms"
+            ]
+          },
+          {
+            "group": "Token Management",
+            "pages": [
+              "tokens/overview",
+              "tokens/initialize",
+              "tokens/backup-restore"
+            ]
+          },
+          {
+            "group": "CLI Tools",
+            "pages": [
+              "cli/softhsm2-util",
+              "cli/softhsm2-keyconv",
+              "cli/softhsm2-migrate",
+              "cli/softhsm2-dump"
+            ]
+          },
+          {
+            "group": "Crypto Backends",
+            "pages": [
+              "crypto/overview",
+              "crypto/openssl",
+              "crypto/botan",
+              "crypto/fips"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/security",
+              "operations/monitoring",
+              "operations/migration"
+            ]
+          },
+          {
+            "group": "Platform Notes",
+            "pages": [
+              "platforms/linux",
+              "platforms/macos",
+              "platforms/windows"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "PKCS#11 Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "pkcs11/overview",
+              "pkcs11/mechanisms"
+            ]
+          },
+          {
+            "group": "Slot & Token Management",
+            "pages": [
+              "pkcs11/slot-token"
+            ]
+          },
+          {
+            "group": "Session Management",
+            "pages": [
+              "pkcs11/sessions"
+            ]
+          },
+          {
+            "group": "Cryptographic Operations",
+            "pages": [
+              "pkcs11/encryption",
+              "pkcs11/signing",
+              "pkcs11/key-generation",
+              "pkcs11/key-wrapping",
+              "pkcs11/key-derivation",
+              "pkcs11/digest",
+              "pkcs11/random"
+            ]
+          },
+          {
+            "group": "Object Management",
+            "pages": [
+              "pkcs11/objects"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Full PKCS#11 v3.2 interface implementation as a shared library (libsofthsm2)",
+    "Support for RSA, DSA, ECDSA, ECDH, EdDSA, DH, GOST, and ML-DSA (post-quantum) algorithms",
+    "Pluggable crypto backends: OpenSSL and Botan",
+    "File-based and SQLite3 database object store backends",
+    "CLI tools: softhsm2-util, softhsm2-keyconv, softhsm2-migrate, softhsm2-dump",
+    "p11-kit integration for system-wide PKCS#11 module registration",
+    "FIPS 140-2 support via OpenSSL FIPS-capable library",
+    "Cross-platform: Linux, macOS, and Windows",
+    "Secure non-paged memory for sensitive key material",
+    "Configurable mechanism allow/deny lists"
+  ],
+  "publicApiSurface": [
+    "C_Initialize / C_Finalize",
+    "C_GetSlotList / C_GetSlotInfo / C_GetTokenInfo",
+    "C_InitToken / C_InitPIN / C_SetPIN",
+    "C_OpenSession / C_CloseSession / C_Login / C_Logout",
+    "C_CreateObject / C_DestroyObject / C_FindObjects",
+    "C_Encrypt / C_Decrypt",
+    "C_Sign / C_Verify",
+    "C_Digest",
+    "C_GenerateKey / C_GenerateKeyPair",
+    "C_WrapKey / C_UnwrapKey / C_DeriveKey",
+    "C_GenerateRandom / C_SeedRandom",
+    "softhsm2-util --init-token / --show-slots / --import / --delete-token",
+    "softhsm2-keyconv --in / --out / --pin",
+    "softhsm2-migrate",
+    "softhsm2-dump-file / softhsm2-dump-db"
+  ]
+}
