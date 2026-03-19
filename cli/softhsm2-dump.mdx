@@ -22,20 +22,20 @@ Dumps a SoftHSM v2 object file from the file-based object store.
 softhsm2-dump-file path
 ```
 
-### Options
+### Arguments
 
 <ParamField path="path" type="string" required>
-  Path to the SoftHSM v2 object file to dump. Object files are stored in the token directory defined in `softhsm2.conf` and typically have names like `<object-id>.object`.
+  Path to the SoftHSM v2 object file to dump. Object files are stored in the token directory defined in `softhsm2.conf` and have names like `<uuid>.object`.
 </ParamField>
 
-<ParamField path="--help, -h" type="flag">
-  Show the help screen.
-</ParamField>
+<Note>
+  `softhsm2-dump-file` takes exactly one positional argument — the path — and no flags.
+</Note>
 
 ### Example
 
 ```bash
-softhsm2-dump-file /var/lib/softhsm/tokens/abc123/00000000.object
+softhsm2-dump-file /var/lib/softhsm/tokens/abc123.../b7e9f2a1-aaaa-bbbb-cccc-111111111111.object
 ```
 
 ## softhsm2-dump-db
@@ -46,20 +46,20 @@ Dumps a SoftHSM v2 SQLite3 database from the database-backed object store.
 softhsm2-dump-db path
 ```
 
-### Options
+### Arguments
 
 <ParamField path="path" type="string" required>
-  Path to the SoftHSM v2 SQLite3 database file to dump. The location of this file is defined in `softhsm2.conf`.
+  Path to the SoftHSM v2 SQLite3 database file to dump. The database file is named `sqlite3.db` and is located inside the token's UUID subdirectory in `directories.tokendir`.
 </ParamField>
 
-<ParamField path="--help, -h" type="flag">
-  Show the help screen.
-</ParamField>
+<Note>
+  `softhsm2-dump-db` takes exactly one positional argument — the path — and no flags.
+</Note>
 
 ### Example
 
 ```bash
-softhsm2-dump-db /var/lib/softhsm/tokens/mytoken/token.db
+softhsm2-dump-db /var/lib/softhsm/tokens/550e8400-e29b-41d4-a716-446655440000/sqlite3.db
 ```
 
 ## Debugging workflow
@@ -75,11 +75,11 @@ softhsm2-dump-db /var/lib/softhsm/tokens/mytoken/token.db
     Run the appropriate tool:
 
     ```bash
-    # File-based backend
-    softhsm2-dump-file /var/lib/softhsm/tokens/<token-dir>/00000001.object
+    # File-based backend: pass one .object file at a time
+    softhsm2-dump-file /var/lib/softhsm/tokens/<token-uuid>/<object-uuid>.object
 
     # SQLite3 database backend
-    softhsm2-dump-db /var/lib/softhsm/tokens/<token-dir>/token.db
+    softhsm2-dump-db /var/lib/softhsm/tokens/<token-uuid>/sqlite3.db
     ```
   </Step>
 </Steps>

@@ -55,7 +55,7 @@ cp -a /var/lib/softhsm/tokens/550e8400-e29b-41d4-a716-446655440000/ \
        /mnt/backup/token-550e8400/
 
 # Online backup using sqlite3 CLI
-sqlite3 /var/lib/softhsm/tokens/550e8400-.../token.db \
+sqlite3 /var/lib/softhsm/tokens/550e8400-e29b-41d4-a716-446655440000/sqlite3.db \
   ".backup /mnt/backup/token-550e8400.db"
 ```
 

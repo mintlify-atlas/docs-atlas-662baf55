@@ -54,7 +54,7 @@ directories.tokendir = /var/lib/softhsm/tokens/
 
 ## SQLite3 database backend
 
-The `db` backend stores all objects for a token in a single SQLite3 database file (`softhsm2.db`) inside the token directory. This backend must be enabled at build time.
+The `db` backend stores all objects for a token in a single SQLite3 database file (`sqlite3.db`) inside the token directory. This backend must be enabled at build time.
 
 ### Build requirement
 
@@ -69,7 +69,7 @@ On Windows, the DB backend is enabled by default since 2.7.0.
 ```
 tokendir/
 └── <token-uuid>/           # one directory per token
-    └── softhsm2.db         # single SQLite3 database for all objects
+    └── sqlite3.db          # single SQLite3 database for all objects
 ```
 
 Each attribute type (boolean, integer, byte string, etc.) is stored in a dedicated table. Object identity is maintained through a primary-key relationship across tables.
